@@ -8,7 +8,10 @@ package raft
 // test with the original before submitting.
 //
 
-import "testing"
+import (
+	"log"
+	"testing"
+)
 import "fmt"
 import "time"
 import "math/rand"
@@ -18,6 +21,21 @@ import "sync"
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
 const RaftElectionTimeout = 1000 * time.Millisecond
+
+func TestMake(t *testing.T) {
+	persister := MakePersister()
+	r := &Raft{
+		persister: persister,
+		term:      0,
+		vote:      0,
+		raftLog:   NewRaftLog(nil, 0, 0, 0, 0),
+	}
+	r.persist()
+
+	applyCh := make(chan ApplyMsg)
+	raft := Make(nil, 1, persister.Copy(), applyCh)
+	log.Printf("%+v", raft)
+}
 
 func TestInitialElection2A(t *testing.T) {
 	servers := 3

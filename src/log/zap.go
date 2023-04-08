@@ -14,9 +14,9 @@ import (
 // init initializes zap.Logger then we can use zap.L() to get this logger.
 func init() {
 	var core zapcore.Core
-	fileCore := zapcore.NewCore(zapFileEncoder(), zapWriteSyncer(), zapLevelEnabler())
+	// fileCore := zapcore.NewCore(zapFileEncoder(), zapWriteSyncer(), zapLevelEnabler())
 	consoleCore := zapcore.NewCore(zapConsoleEncoder(), os.Stdout, zapLevelEnabler())
-	core = zapcore.NewTee(fileCore, consoleCore)
+	core = zapcore.NewTee(consoleCore)
 	logger := zap.New(core, zap.AddCaller())
 	zap.ReplaceGlobals(logger)
 }
@@ -69,4 +69,3 @@ func zapWriteSyncer() zapcore.WriteSyncer {
 	}
 	return zapcore.AddSync(lumberJackLogger)
 }
-
