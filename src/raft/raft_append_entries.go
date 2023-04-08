@@ -95,7 +95,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.becomeFollower(args.Term, args.LeaderId)
 	}
 
-	// (3) 2. Check leader's prev log newEnt.
+	// (3) 2. Check leader's prev log entry.
 	l := rf.raftLog
 	lastIndex := l.LastIndex()
 	if args.PrevLogIndex > lastIndex {
@@ -103,7 +103,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	// (4) Optimization: search the first newEnt whose term is unmatched with leader's prev log newEnt.
+	// (4) Optimization: search the first entry whose term is unmatched with leader's prev log entry.
 	if args.PrevLogIndex > l.FirstIndex() {
 		prevEntry := l.EntryAt(args.PrevLogIndex)
 		if prevEntry.Term != args.PrevLogTerm {
@@ -121,8 +121,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			continue
 		}
 		if newEnt.Index <= l.LastIndex() {
-			// (5) 3. If an existing newEnt conflicts with a new one (same index but different terms),
-			// update the existing newEnt and delete all entries that follow it.
+			// (5) 3. If an existing entry conflicts with a new one (same index but different terms),
+			// update the existing entry and delete all entries that follow it.
 			entry := l.EntryAt(newEnt.Index)
 			if entry.Term != newEnt.Term {
 				l.Update(entry.Index, newEnt)
