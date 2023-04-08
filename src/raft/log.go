@@ -56,7 +56,12 @@ func NewRaftLog(entries []Entry, committed, applied int, lastSnapshotTerm, lastS
 	return raftLog
 }
 
-// LastEntry returns the index of the last log entry.
+// FirstIndex returns the index of the first log entry.
+func (l *RaftLog) FirstIndex() int {
+	return l.entries[0].Index + 1
+}
+
+// LastIndex returns the index of the last log entry.
 func (l *RaftLog) LastIndex() int {
 	return l.entries[len(l.entries)-1].Index
 }
@@ -71,6 +76,11 @@ func (l *RaftLog) AppendEntry(entry Entry) {
 	l.entries = append(l.entries, entry)
 }
 
+// AppendEntry appends an entry to tail.
+func (l *RaftLog) AppendEntries(entries []Entry) {
+	l.entries = append(l.entries, entries...)
+}
+
 // EntryAt returns the entry corresponding to the index of log entry.
 func (l *RaftLog) EntryAt(logIndex int) Entry {
 	sliceIndex := l.ToSliceIndex(logIndex)
@@ -78,29 +88,49 @@ func (l *RaftLog) EntryAt(logIndex int) Entry {
 	return l.entries[sliceIndex]
 }
 
-// After returns all the entries after the given index of log entry.
+// EntriesAfter returns all the entries whose index is after the given index of log entry.
 func (l *RaftLog) EntriesAfter(logIndex int) []Entry {
 	sliceIndex := l.ToSliceIndex(logIndex)
 	l.validateIndex(sliceIndex)
 	return l.entries[sliceIndex+1:]
 }
 
+// Update updates the entry at the given index of log entry.
+func (l *RaftLog) Update(logIndex int, entry Entry) {
+	sliceIndex := l.ToSliceIndex(logIndex)
+	l.validateIndex(sliceIndex)
+	l.entries[sliceIndex] = entry
+}
+
+// RemoveAfter removes entries whose index is after the given index of log entry.
+func (l *RaftLog) RemoveAfter(logIndex int) []Entry {
+	sliceIndex := l.ToSliceIndex(logIndex)
+	l.validateIndex(sliceIndex)
+	l.entries = l.entries[:sliceIndex+1]
+}
+
 // CommitTo advances committed index.
 func (l *RaftLog) CommitTo(committed int) {
+	if committed < l.committed {
+		l.logger.Panicf("RaftLog: new committed(%d) is less than current committed(%d)", committed, l.committed)
+	}
 	l.committed = committed
 }
 
 // ApplyTo advances applied index.
 func (l *RaftLog) ApplyTo(applied int) {
+	if applied < l.applied {
+		l.logger.Panicf("RaftLog: new applied(%d) is less than current applied(%d)", applied, l.applied)
+	}
 	l.applied = applied
 }
 
-// toEntryIndex returns the index of log entry corresponding to the slice index.
+// ToEntryIndex returns the index of log entry corresponding to the slice index.
 func (l *RaftLog) ToEntryIndex(sliceIndex int) int {
 	return l.entries[0].Index + sliceIndex
 }
 
-// toSliceIndex return the slice index in corresponding to the index of log entry.
+// ToSliceIndex return the slice index in corresponding to the index of log entry.
 func (l *RaftLog) ToSliceIndex(logIndex int) int {
 	return logIndex - l.entries[0].Index
 }

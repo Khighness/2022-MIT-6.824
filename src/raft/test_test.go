@@ -9,14 +9,14 @@ package raft
 //
 
 import (
+	"fmt"
 	"log"
+	"math/rand"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
-import "fmt"
-import "time"
-import "math/rand"
-import "sync/atomic"
-import "sync"
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).

@@ -279,7 +279,7 @@ func (rf *Raft) becomeCandidate() {
 	rf.logger.Infof("%s role: %s -> %s, previous leader: %v", rf, rf.role, Candidate, rf.lead)
 	rf.role = Candidate
 
-	// Increase term.
+	// Increment term.
 	rf.term++
 	rf.lead = None
 

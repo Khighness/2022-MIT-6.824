@@ -54,16 +54,20 @@ func (rf *Raft) startElection() {
 
 // sendRequestVoteToPeer sends RequestVoteArgs to the specified peer.
 func (rf *Raft) sendRequestVoteToPeer(peer int, args *RequestVoteArgs) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if !rf.isCandidate() {
+		return
+	}
+
 	var reply RequestVoteReply
 	if !rf.sendRequestVote(peer, args, &reply) {
 		rf.logger.Warnf("%s failed to send RVA to: %d", rf, peer)
 		return
 	}
 
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	if rf.term < reply.Term && rf.isCandidate() {
+	if rf.term < reply.Term {
 		rf.becomeFollower(reply.Term, None)
 		return
 	}
