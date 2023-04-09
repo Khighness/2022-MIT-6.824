@@ -33,6 +33,12 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 func (rf *Raft) sendInstallSnapshotToPeer(peer int) {
 }
 
+// shouldSendInstallSnapshot checks if leader need to send InstallSnapshotArgs to the given peer.
+func (rf *Raft) shouldSendInstallSnapshot(peer int) bool {
+	prevLogIndex := rf.progress[peer].Next - 1
+	return prevLogIndex < rf.raftLog.lastSnapshotIndex
+}
+
 // InstallSnapshot handles InstallSnapshotArgs and replies InstallSnapshotReply.
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 

@@ -1,6 +1,9 @@
 package raft
 
-import "go.uber.org/zap"
+import (
+	"6.824/log"
+	"go.uber.org/zap"
+)
 
 // @Author KHighness
 // @Update 2023-04-08
@@ -43,7 +46,7 @@ func NewRaftLog(entries []Entry, committed, applied int, lastSnapshotTerm, lastS
 		applied:           applied,
 		lastSnapshotTerm:  lastSnapshotTerm,
 		lastSnapshotIndex: lastSnapshotIndex,
-		logger:            zap.S(),
+		logger:            log.NewZapLogger("RaftLog").Sugar(),
 	}
 
 	if len(entries) == 0 { // dummy entry which stores the meta data of last snapshot
@@ -56,14 +59,19 @@ func NewRaftLog(entries []Entry, committed, applied int, lastSnapshotTerm, lastS
 	return raftLog
 }
 
-// FirstIndex returns the index of the first log entry.
+// FirstIndex returns the index of the first entry.
 func (l *RaftLog) FirstIndex() int {
 	return l.entries[0].Index + 1
 }
 
-// LastIndex returns the index of the last log entry.
+// LastIndex returns the index of the last entry.
 func (l *RaftLog) LastIndex() int {
 	return l.entries[len(l.entries)-1].Index
+}
+
+// Length return the length of entries.
+func (l *RaftLog) Length() int {
+	return len(l.entries)
 }
 
 // LastEntry returns the last entry.
@@ -76,34 +84,34 @@ func (l *RaftLog) AppendEntry(entry Entry) {
 	l.entries = append(l.entries, entry)
 }
 
-// AppendEntry appends an entry to tail.
+// AppendEntry appends the entries to tail.
 func (l *RaftLog) AppendEntries(entries []Entry) {
 	l.entries = append(l.entries, entries...)
 }
 
-// EntryAt returns the entry corresponding to the index of log entry.
+// EntryAt returns the entry corresponding to the index of entry.
 func (l *RaftLog) EntryAt(logIndex int) Entry {
 	sliceIndex := l.ToSliceIndex(logIndex)
 	l.validateIndex(sliceIndex)
 	return l.entries[sliceIndex]
 }
 
-// EntriesAfter returns all the entries whose index is after the given index of log entry.
+// EntriesAfter returns all the entries whose index is after the given index of entry.
 func (l *RaftLog) EntriesAfter(logIndex int) []Entry {
 	sliceIndex := l.ToSliceIndex(logIndex)
 	l.validateIndex(sliceIndex)
 	return l.entries[sliceIndex+1:]
 }
 
-// Update updates the entry at the given index of log entry.
+// Update updates the entry at the given index of entry.
 func (l *RaftLog) Update(logIndex int, entry Entry) {
 	sliceIndex := l.ToSliceIndex(logIndex)
 	l.validateIndex(sliceIndex)
 	l.entries[sliceIndex] = entry
 }
 
-// RemoveAfter removes entries whose index is after the given index of log entry.
-func (l *RaftLog) RemoveAfter(logIndex int) []Entry {
+// RemoveAfter removes entries whose index is after the given index of entry.
+func (l *RaftLog) RemoveAfter(logIndex int) {
 	sliceIndex := l.ToSliceIndex(logIndex)
 	l.validateIndex(sliceIndex)
 	l.entries = l.entries[:sliceIndex+1]
@@ -125,17 +133,17 @@ func (l *RaftLog) ApplyTo(applied int) {
 	l.applied = applied
 }
 
-// ToEntryIndex returns the index of log entry corresponding to the slice index.
+// ToEntryIndex returns the index of entry corresponding to the slice index.
 func (l *RaftLog) ToEntryIndex(sliceIndex int) int {
 	return l.entries[0].Index + sliceIndex
 }
 
-// ToSliceIndex return the slice index in corresponding to the index of log entry.
+// ToSliceIndex return the slice index in corresponding to the index of entry.
 func (l *RaftLog) ToSliceIndex(logIndex int) int {
 	return logIndex - l.entries[0].Index
 }
 
-// Compact removes the entries that have been compacted into snapshots.
+// Compact removes the entries that have been compacted into snapshot.
 func (l *RaftLog) Compact(index int) {
 
 }

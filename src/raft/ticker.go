@@ -8,7 +8,7 @@ import (
 // @Update 2023-04-08
 
 const (
-	logReplicationInterval = time.Duration(150) * time.Millisecond
+	logReplicationInterval = time.Duration(100) * time.Millisecond
 	electionTimeoutLower   = time.Duration(300) * time.Millisecond
 	electionTimeoutUpper   = time.Duration(600) * time.Millisecond
 )
@@ -28,19 +28,23 @@ func newTicker() ticker {
 	}
 }
 
-// resetLogReplicationTicker used to notify Leader to broadcast heartbeat periodically.
-// The call principle is:
-//	For leader, it is called after broadcasting a round of heartbeat.
+// resetLogReplicationTicker resets logReplicationTicker.
 func (t *ticker) resetLogReplicationTicker() {
 	t.logReplicationTicker.Reset(logReplicationInterval)
 }
 
-// resetElectionTimeoutTicker used to prevent Follower or Candidate starting election.
-// The call principle is:
-//	For follower or candidate, it is called after receiving Leader's heartbeat
-//	or Candidate's request vote.
-//	After starting an round of election, it should also be called.
+// stopLogReplicationTicker stopes logReplicationTicker.
+func (t *ticker) stopLogReplicationTicker() {
+	t.logReplicationTicker.Stop()
+}
+
+// resetElectionTimeoutTicker reset electionTimeoutTicker.
 func (t *ticker) resetElectionTimeoutTicker() {
 	electionTimeout := randTimeDuration(electionTimeoutLower, electionTimeoutUpper)
 	t.electionTimeoutTicker.Reset(electionTimeout)
+}
+
+// stopElectionTimeoutTicker stopes electionTimeoutTicker.
+func (t *ticker) stopElectionTimeoutTicker() {
+	t.electionTimeoutTicker.Stop()
 }

@@ -35,6 +35,8 @@ func TestMake(t *testing.T) {
 	applyCh := make(chan ApplyMsg)
 	raft := Make(nil, 1, persister.Copy(), applyCh)
 	log.Printf("%+v", raft)
+	reply := AppendEntriesReply{}
+	log.Printf("%+v", reply)
 }
 
 func TestInitialElection2A(t *testing.T) {

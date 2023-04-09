@@ -20,8 +20,8 @@ type RequestVoteReply struct {
 // startElection starts a new round of election.
 func (rf *Raft) startElection() {
 	rf.mu.Lock()
+
 	if rf.isLeader() {
-		rf.mu.Unlock()
 		return
 	}
 
@@ -31,7 +31,6 @@ func (rf *Raft) startElection() {
 	if rf.isStandalone() {
 		rf.logger.Infof("%s run in standalone mode, become leader at %d directly", rf, rf.term)
 		rf.becomeLeader()
-		rf.mu.Unlock()
 		return
 	}
 
@@ -42,6 +41,7 @@ func (rf *Raft) startElection() {
 		LastLogIndex: lastEntry.Index,
 		LastLogTerm:  lastEntry.Term,
 	}
+
 	rf.mu.Unlock()
 
 	for peer := range rf.peers {
@@ -54,6 +54,17 @@ func (rf *Raft) startElection() {
 
 // sendRequestVoteToPeer sends RequestVoteArgs to the specified peer.
 func (rf *Raft) sendRequestVoteToPeer(peer int, args *RequestVoteArgs) {
+	var reply RequestVoteReply
+	if !rf.sendRequestVote(peer, args, &reply) {
+		rf.logger.Warnf("%s failed to send RVA to: %d", rf, peer)
+		return
+	}
+
+	rf.handleRequestVotesReply(peer, reply)
+}
+
+// handleRequestVotesReply handles RequestVoteReply from the specified peer.
+func (rf *Raft) handleRequestVotesReply(peer int, reply RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -61,13 +72,9 @@ func (rf *Raft) sendRequestVoteToPeer(peer int, args *RequestVoteArgs) {
 		return
 	}
 
-	var reply RequestVoteReply
-	if !rf.sendRequestVote(peer, args, &reply) {
-		rf.logger.Warnf("%s failed to send RVA to: %d", rf, peer)
-		return
-	}
-
 	if rf.term < reply.Term {
+		rf.logger.Infof("%s RVR term(%d) > current term(%d), become follower at term: %d",
+			rf, reply.Term, rf.term, reply.Term)
 		rf.becomeFollower(reply.Term, None)
 		return
 	}
@@ -78,11 +85,11 @@ func (rf *Raft) sendRequestVoteToPeer(peer int, args *RequestVoteArgs) {
 	votes := len(rf.ballotBox)
 	grantVotes := rf.grantVotes()
 	if grantVotes > quorum {
-		rf.logger.Infof("%s receive quorum votes: (%d/%d), become leader at term: %d",
+		rf.logger.Infof("%s receive quorum votes: %d/%d, become leader at term: %d",
 			rf, grantVotes, votes, rf.term)
 		rf.becomeLeader()
 	} else if total == votes && grantVotes < total-quorum { // This round of election ended in failure.
-		rf.logger.Infof("%s receive insufficient votes: (%d/%d), become follower at term: %d",
+		rf.logger.Infof("%s receive insufficient votes: %d/%d, become follower at term: %d",
 			rf, grantVotes, votes, rf.term-1)
 		rf.becomeFollower(rf.term-1, None)
 	}
@@ -101,6 +108,9 @@ func (rf *Raft) grantVotes() int {
 
 // RequestVote handles RequestVoteArgs and replies RequestVoteReply.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
+	rf.logger.Debugf("%s receive RVA%+v from peer %d", rf, args, args.CandidateId)
+	defer rf.logger.Debugf("%s send RVR%+v to peer %d", rf, reply, args.CandidateId)
+
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -124,7 +134,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
+	rf.vote = args.CandidateId
 	reply.Voted = true
+	rf.tick.resetElectionTimeoutTicker()
 }
 
 // sendRequestVote calls RequestVote RPC.

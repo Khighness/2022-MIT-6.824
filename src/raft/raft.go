@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"6.824/log"
 	"bytes"
 	"fmt"
 	"sync"
@@ -35,37 +36,6 @@ const Zero int = 0
 
 // None is a placeholder node ID used when there is no leader.
 const None int = -1
-
-// NodeRole represents the role of a node in a cluster.
-type NodeRole uint8
-
-const (
-	Follower NodeRole = iota
-	Candidate
-	Leader
-)
-
-var roleNameMap = [...]string{
-	"Follower",
-	"Candidate",
-	"Leader",
-}
-
-var roleShortNameMap = [...]string{
-	"F",
-	"C",
-	"L",
-}
-
-// String returns role's full name.
-func (nr NodeRole) String() string {
-	return roleNameMap[int(nr)]
-}
-
-// String returns role's short name.
-func (nr NodeRole) ShortString() string {
-	return roleShortNameMap[int(nr)]
-}
 
 // Progress structure.
 // It represents a follower's progress in the view of the leader.
@@ -118,6 +88,8 @@ func (rf *Raft) String() string {
 
 // GetState returns the peer's current state and if current peer is leader.
 func (rf *Raft) GetState() (int, bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	return rf.term, rf.isLeader()
 }
 
@@ -184,7 +156,7 @@ func (rf *Raft) readPersist(data []byte) {
 		vote int
 	)
 	if decoder.Decode(&term) != nil || decoder.Decode(&vote) != nil {
-		rf.logger.Panic("%s failed to decode raft state from persist data")
+		rf.logger.Panic("failed to decode raft state from persist data")
 	}
 
 	// Raft log.
@@ -197,7 +169,7 @@ func (rf *Raft) readPersist(data []byte) {
 	)
 	if decoder.Decode(&entries) != nil || decoder.Decode(&committed) != nil || decoder.Decode(&applied) != nil ||
 		decoder.Decode(&lastSnapshotIndex) != nil || decoder.Decode(&lastSnapshotTerm) != nil {
-		rf.logger.Panic("%s failed to decode raft log from persist data")
+		rf.logger.Panic("failed to decode raft log from persist data")
 	}
 
 	// Recovery.
@@ -262,6 +234,19 @@ func (rf *Raft) isStandalone() bool {
 	return len(rf.peers) == 1
 }
 
+// lock tries to acquire lock with action log.
+func (rf *Raft) lock(action string) {
+	rf.logger.Debugf("%s try to lock for: %s", rf, action)
+	rf.mu.Lock()
+	rf.logger.Debugf("%s succeed to lock for: %s", rf, action)
+}
+
+// lock tries to release lock with action log.
+func (rf *Raft) unlock(action string) {
+	rf.mu.Unlock()
+	rf.logger.Debugf("%s succeed to unlock after: %s", rf, action)
+}
+
 // becomeFollower transform this peer's state to Follower.
 func (rf *Raft) becomeFollower(term int, lead int) {
 	rf.logger.Infof("%s role: %s -> %s, current leader: %v", rf, rf.role, Follower, lead)
@@ -269,8 +254,9 @@ func (rf *Raft) becomeFollower(term int, lead int) {
 	rf.term = term
 	rf.vote = None
 	rf.lead = lead
-	rf.ballotBox = nil
+
 	rf.persist()
+	rf.tick.stopLogReplicationTicker()
 	rf.tick.resetElectionTimeoutTicker()
 }
 
@@ -291,6 +277,7 @@ func (rf *Raft) becomeCandidate() {
 	rf.ballotBox[rf.id] = true
 
 	rf.persist()
+	rf.tick.stopLogReplicationTicker()
 	rf.tick.resetElectionTimeoutTicker()
 }
 
@@ -300,7 +287,6 @@ func (rf *Raft) becomeLeader() {
 	rf.role = Leader
 	rf.lead = rf.id
 	rf.vote = None
-	rf.ballotBox = nil
 
 	lastIndex := rf.raftLog.LastIndex()
 
@@ -321,10 +307,12 @@ func (rf *Raft) becomeLeader() {
 	if rf.isStandalone() {
 		rf.raftLog.CommitTo(rf.progress[rf.id].Match)
 	} else {
-		rf.replicateLog(false)
+		go rf.replicateLog(true)
 	}
 
 	rf.persist()
+	rf.tick.stopElectionTimeoutTicker()
+	rf.tick.resetLogReplicationTicker()
 }
 
 // ticker triggers leader to broadcast heartbeat
@@ -335,6 +323,9 @@ func (rf *Raft) ticker() {
 		case <-rf.tick.electionTimeoutTicker.C:
 			rf.startElection()
 		case <-rf.tick.logReplicationTicker.C:
+			if rf.isLeader() {
+				rf.logger.Infof("%s tick log", rf)
+			}
 			rf.replicateLog(true)
 		}
 	}
@@ -375,9 +366,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.tick = newTicker()
 	rf.raftLog = NewRaftLog(nil, Zero, Zero, Zero, Zero)
 	rf.progress = make(map[int]*Progress)
+	for peer := range peers {
+		rf.progress[peer] = &Progress{}
+	}
+
 	rf.applyCh = applyCh
 	rf.notifyApplyCh = make(chan struct{}, 10)
-	rf.logger = zap.S()
+	rf.logger = log.NewZapLogger("Raft").Sugar()
 
 	rf.becomeFollower(Zero, None)
 	rf.readPersist(persister.ReadRaftState())
