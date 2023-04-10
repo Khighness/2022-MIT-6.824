@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"6.824/labgob"
 	"6.824/labrpc"
@@ -236,20 +237,20 @@ func (rf *Raft) isStandalone() bool {
 
 // lock tries to acquire lock with action log.
 func (rf *Raft) lock(action string) {
-	rf.logger.Debugf("%s try to lock for: %s", rf, action)
+	rf.logger.Debugf("%s Try to lock for: %s", rf, action)
 	rf.mu.Lock()
-	rf.logger.Debugf("%s succeed to lock for: %s", rf, action)
+	rf.logger.Debugf("%s Succeed to lock for: %s", rf, action)
 }
 
 // lock tries to release lock with action log.
 func (rf *Raft) unlock(action string) {
 	rf.mu.Unlock()
-	rf.logger.Debugf("%s succeed to unlock after: %s", rf, action)
+	rf.logger.Debugf("%s Succeed to unlock after: %s", rf, action)
 }
 
 // becomeFollower transform this peer's state to Follower.
 func (rf *Raft) becomeFollower(term int, lead int) {
-	rf.logger.Infof("%s role: %s -> %s, current leader: %v", rf, rf.role, Follower, lead)
+	rf.logger.Infof("%s Role: %s -> %s, current leader: %v", rf, rf.role, Follower, lead)
 	rf.role = Follower
 	rf.term = term
 	rf.vote = None
@@ -262,7 +263,7 @@ func (rf *Raft) becomeFollower(term int, lead int) {
 
 // becomeCandidate transform this peer's role to Candidate.
 func (rf *Raft) becomeCandidate() {
-	rf.logger.Infof("%s role: %s -> %s, previous leader: %v", rf, rf.role, Candidate, rf.lead)
+	rf.logger.Infof("%s Role: %s -> %s, previous leader: %v", rf, rf.role, Candidate, rf.lead)
 	rf.role = Candidate
 
 	// Increment term.
@@ -283,7 +284,7 @@ func (rf *Raft) becomeCandidate() {
 
 // becomeLeader transform this peer's role to Leader.
 func (rf *Raft) becomeLeader() {
-	rf.logger.Infof("%s role: %s -> %s, previous leader: %v", rf, rf.role, Leader, rf.lead)
+	rf.logger.Infof("%s Role: %s -> %s, previous leader: %v", rf, rf.role, Leader, rf.lead)
 	rf.role = Leader
 	rf.lead = rf.id
 	rf.vote = None
@@ -323,9 +324,6 @@ func (rf *Raft) ticker() {
 		case <-rf.tick.electionTimeoutTicker.C:
 			rf.startElection()
 		case <-rf.tick.logReplicationTicker.C:
-			if rf.isLeader() {
-				rf.logger.Infof("%s tick log", rf)
-			}
 			rf.replicateLog(true)
 		}
 	}
@@ -359,6 +357,8 @@ func (rf *Raft) applyCommand() {
 // for any long-running work.
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
+	timeStart := time.Now()
+
 	rf := &Raft{}
 	rf.peers = peers
 	rf.persister = persister
@@ -374,11 +374,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.notifyApplyCh = make(chan struct{}, 10)
 	rf.logger = log.NewZapLogger("Raft").Sugar()
 
+	rf.logger.Infof("Start peer [%d] in raft cluster: %v", me, peers)
+
 	rf.becomeFollower(Zero, None)
 	rf.readPersist(persister.ReadRaftState())
 
 	go rf.ticker()
 	go rf.applier()
+
+	rf.logger.Infof("%s Raft peer [%d] initializes successfully in %vms", rf, me, time.Since(timeStart).Milliseconds())
 
 	return rf
 }

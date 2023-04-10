@@ -25,11 +25,11 @@ func (rf *Raft) startElection() {
 		return
 	}
 
-	rf.logger.Infof("%s start election", rf)
+	rf.logger.Infof("%s Start election", rf)
 	rf.becomeCandidate()
 
 	if rf.isStandalone() {
-		rf.logger.Infof("%s run in standalone mode, become leader at %d directly", rf, rf.term)
+		rf.logger.Infof("%s Run in standalone mode, become leader at %d directly", rf, rf.term)
 		rf.becomeLeader()
 		return
 	}
@@ -56,7 +56,7 @@ func (rf *Raft) startElection() {
 func (rf *Raft) sendRequestVoteToPeer(peer int, args *RequestVoteArgs) {
 	var reply RequestVoteReply
 	if !rf.sendRequestVote(peer, args, &reply) {
-		rf.logger.Warnf("%s failed to send RVA to: %d", rf, peer)
+		rf.logger.Warnf("%s Failed to send RVA to: %d", rf, peer)
 		return
 	}
 
@@ -85,11 +85,11 @@ func (rf *Raft) handleRequestVotesReply(peer int, reply RequestVoteReply) {
 	votes := len(rf.ballotBox)
 	grantVotes := rf.grantVotes()
 	if grantVotes > quorum {
-		rf.logger.Infof("%s receive quorum votes: %d/%d, become leader at term: %d",
+		rf.logger.Infof("%s Receive quorum votes: %d/%d, become leader at term: %d",
 			rf, grantVotes, votes, rf.term)
 		rf.becomeLeader()
 	} else if total == votes && grantVotes < total-quorum { // This round of election ended in failure.
-		rf.logger.Infof("%s receive insufficient votes: %d/%d, become follower at term: %d",
+		rf.logger.Infof("%s Receive insufficient votes: %d/%d, become follower at term: %d",
 			rf, grantVotes, votes, rf.term-1)
 		rf.becomeFollower(rf.term-1, None)
 	}
@@ -108,8 +108,8 @@ func (rf *Raft) grantVotes() int {
 
 // RequestVote handles RequestVoteArgs and replies RequestVoteReply.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	rf.logger.Debugf("%s receive RVA%+v from peer %d", rf, args, args.CandidateId)
-	defer rf.logger.Debugf("%s send RVR%+v to peer %d", rf, reply, args.CandidateId)
+	rf.logger.Debugf("%s Receive RVA%+v from peer %d", rf, args, args.CandidateId)
+	defer rf.logger.Debugf("%s Send RVR%+v to peer %d", rf, reply, args.CandidateId)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()

@@ -43,13 +43,12 @@ func (rf *Raft) replicateLog(isHeartbeat bool) {
 		return
 	}
 
-	rf.logger.Debugf("%s replicate log", rf)
+	rf.logger.Infof("%s Replicate log", rf)
 	for peer := range rf.peers {
 		if peer == rf.id {
 			continue
 		}
 
-		rf.logger.Debugf("%s replicate log to: %d", rf, peer)
 		prs := rf.progress[peer]
 		if rf.shouldSendAppendEntries(isHeartbeat, rf.raftLog, prs) {
 			if rf.shouldSendInstallSnapshot(peer) {
@@ -88,12 +87,12 @@ func (rf *Raft) sendAppendEntriesToPeer(peer int) {
 
 	var reply AppendEntriesReply
 	if !rf.sendAppendEntries(peer, args, &reply) {
-		rf.logger.Warnf("%s failed to send AEA to peer %d", rf, peer)
+		rf.logger.Warnf("%s Failed to send AEA to peer %d", rf, peer)
 		return
 	}
 
-	rf.logger.Debugf("%s send AEA%+v to peer %d", rf, args, peer)
-	rf.logger.Debugf("%s receive AER%+v from peer %d", rf, reply, peer)
+	rf.logger.Debugf("%s Send AEA%+v to peer %d", rf, args, peer)
+	rf.logger.Debugf("%s Receive AER%+v from peer %d", rf, reply, peer)
 	rf.handleAppendEntriesReply(peer, reply)
 }
 
