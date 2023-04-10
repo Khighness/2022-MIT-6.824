@@ -152,6 +152,6 @@ func (l *RaftLog) Compact(index int) {
 func (l *RaftLog) validateIndex(sliceIndex int) {
 	entLen := len(l.entries)
 	if sliceIndex < 0 || sliceIndex >= entLen {
-		l.logger.Panicf("RaftLog: index %s is out bound of [0, %d]", sliceIndex, entLen)
+		l.logger.Panicf("RaftLog: index %d is out bound of [0, %d]", sliceIndex, entLen)
 	}
 }
