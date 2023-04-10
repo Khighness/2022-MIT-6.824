@@ -115,8 +115,8 @@ func (rf *Raft) grantVotes() int {
 
 // RequestVote handles RequestVoteArgs and replies RequestVoteReply.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	rf.logger.Debugf("%s Receive RVA%+v from peer %d", rf, args, args.CandidateId)
-	defer rf.logger.Debugf("%s Send RVR%+v to peer %d", rf, reply, args.CandidateId)
+	rf.logger.Debugf("%s Receive RVA%+v from peer [%d]", rf, args, args.CandidateId)
+	defer rf.logger.Debugf("%s Send RVR%+v to peer [%d]", rf, reply, args.CandidateId)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()

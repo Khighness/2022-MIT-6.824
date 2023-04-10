@@ -257,7 +257,7 @@ func (rf *Raft) unlock(action string) {
 	rf.logger.Debugf("%s Succeed to unlock after: %s", rf, action)
 }
 
-// becomeFollower transform this peer's state to Follower.
+// becomeFollower transforms this peer's role to Follower.
 func (rf *Raft) becomeFollower(term int, lead int) {
 	rf.logger.Infof("%s Role: %s -> %s, current leader: %v", rf, rf.role, Follower, lead)
 	rf.role = Follower
@@ -270,7 +270,7 @@ func (rf *Raft) becomeFollower(term int, lead int) {
 	rf.tick.resetElectionTimeoutTicker()
 }
 
-// becomeCandidate transform this peer's role to Candidate.
+// becomeCandidate transforms this peer's role to Candidate.
 func (rf *Raft) becomeCandidate() {
 	rf.logger.Infof("%s Role: %s -> %s, previous leader: %v", rf, rf.role, Candidate, rf.lead)
 	rf.role = Candidate
@@ -291,29 +291,27 @@ func (rf *Raft) becomeCandidate() {
 	rf.tick.resetElectionTimeoutTicker()
 }
 
-// becomeLeader transform this peer's role to Leader.
+// becomeLeader transforms this peer's role to Leader.
 func (rf *Raft) becomeLeader() {
 	rf.logger.Infof("%s Role: %s -> %s, previous leader: %v", rf, rf.role, Leader, rf.lead)
 	rf.role = Leader
 	rf.lead = rf.id
 	rf.vote = None
 
-	// Note: Leader should propose a noop entry on its term.
-	noopEntry := rf.leaderAppendEntry(nil)
+	// Note: Leader maybe add a no-operation log entry on its term.
+	// But don't do this in MIT6.824, otherwise you can't pass lab2B.
+	// noopEntry := rf.leaderAppendEntry(nil)
 
-	// Set replication progress.
+	// Initialize replication progress.
+	nextIndex := rf.raftLog.LastIndex() + 1
 	for peer := range rf.peers {
 		if peer != rf.id {
-			rf.progress[peer].Next = noopEntry.Index
+			rf.progress[peer].Next = nextIndex
 		}
 	}
 
-	// Replicate the noop entry immediately.
-	if rf.isStandalone() {
-		rf.raftLog.CommitTo(rf.progress[rf.id].Match)
-	} else {
-		go rf.replicateLog(true)
-	}
+	// Broadcast heartbeat immediately。
+	go rf.replicateLog(true)
 
 	rf.persist()
 	rf.tick.stopElectionTimeoutTicker()
@@ -347,10 +345,6 @@ func (rf *Raft) applier() {
 func (rf *Raft) applyCommand() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-
-	if !rf.isLeader() {
-		return
-	}
 
 	l := rf.raftLog
 	if l.applied < l.lastSnapshotIndex {

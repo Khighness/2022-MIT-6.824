@@ -62,7 +62,7 @@ func (rf *Raft) replicateLogToPeer(peer int, isHeartbeat bool) {
 		if rf.shouldSendInstallSnapshot(peer) {
 			go rf.sendInstallSnapshotToPeer(peer)
 		} else {
-			rf.logger.Infof("%s Replicate log to %d", rf, peer)
+			rf.logger.Infof("%s Replicate log to peer [%d]", rf, peer)
 			go rf.sendAppendEntriesToPeer(peer)
 		}
 	}
@@ -95,12 +95,12 @@ func (rf *Raft) sendAppendEntriesToPeer(peer int) {
 
 	var reply AppendEntriesReply
 	if !rf.sendAppendEntries(peer, args, &reply) {
-		rf.logger.Warnf("%s Failed to send AEA to peer %d", rf, peer)
+		rf.logger.Warnf("%s Failed to send AEA to peer [%d]", rf, peer)
 		return
 	}
 
-	rf.logger.Debugf("%s Send AEA%+v to peer %d", rf, args, peer)
-	rf.logger.Debugf("%s Receive AER%+v from peer %d", rf, reply, peer)
+	rf.logger.Debugf("%s Send AEA%+v to peer [%d]", rf, args, peer)
+	rf.logger.Debugf("%s Receive AER%+v from peer [%d]", rf, reply, peer)
 	rf.handleAppendEntriesReply(peer, reply)
 }
 
@@ -175,8 +175,8 @@ func (rf *Raft) tryAdvanceCommitted() {
 
 // AppendEntries handles AppendEntriesArgs and replies AppendEntriesReply.
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	rf.logger.Debugf("%s Receive AEA%+v from peer %d", rf, args, args.LeaderId)
-	defer rf.logger.Debugf("%s Send AER%+v to peer %d", rf, reply, args.LeaderId)
+	rf.logger.Debugf("%s Receive AEA%+v from peer [%d]", rf, args, args.LeaderId)
+	defer rf.logger.Debugf("%s Send AER%+v to peer [%d]", rf, reply, args.LeaderId)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -238,6 +238,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// (7) 5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, lastIndex).
 	if args.LeaderCommit > l.committed {
 		l.CommitTo(min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries)))
+		rf.notifyApplyCh <- applySignal
 	}
 
 	reply.Success = true
