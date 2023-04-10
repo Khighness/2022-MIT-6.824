@@ -125,7 +125,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Voted = false
 
 	// 1. Check if candidate's term is less than the receiver term.
-	if args.Term < rf.term {
+	//    or peer already grants vote to another candidate.
+	if args.Term < rf.term ||
+		(args.Term == rf.term && rf.vote != None && rf.vote != args.CandidateId) {
 		return
 	}
 
@@ -135,12 +137,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = rf.term
 	}
 
-	// 3. Check if the receiver's vote is null.
-	if rf.vote != None {
-		return
-	}
-
-	// 4. Check if candidate's log is at least as up-to-date as receiver's log.
+	// 3. Check if candidate's log is at least as up-to-date as receiver's log.
 	lastEntry := rf.raftLog.LastEntry()
 	if lastEntry.Term > args.LastLogTerm ||
 		(lastEntry.Term == args.LastLogTerm && lastEntry.Index > args.LastLogIndex) {

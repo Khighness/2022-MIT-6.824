@@ -44,6 +44,9 @@ type Progress struct {
 	Match, Next int
 }
 
+// applySignal is a signal to notify leader to command.
+var applySignal = struct{}{}
+
 // ApplyMsg structure.
 type ApplyMsg struct {
 	CommandValid bool
@@ -197,14 +200,14 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	index := -1
-	term := -1
-
 	if !rf.isLeader() {
-		return index, term, false
+		return None, None, false
 	}
 
-	return index, term, true
+	rf.logger.Infof("%s Propose command: %v", rf, command)
+	entry := rf.leaderAppendEntry(command)
+	rf.replicateLog(false)
+	return entry.Index, entry.Term, true
 }
 
 // Kill sets the peer to dead.
@@ -295,18 +298,13 @@ func (rf *Raft) becomeLeader() {
 	rf.lead = rf.id
 	rf.vote = None
 
-	lastIndex := rf.raftLog.LastIndex()
-
 	// Note: Leader should propose a noop entry on its term.
-	rf.raftLog.AppendEntry(NewEntry(rf.term, lastIndex+1, nil))
+	noopEntry := rf.leaderAppendEntry(nil)
 
 	// Set replication progress.
 	for peer := range rf.peers {
-		if peer == rf.id {
-			rf.progress[peer].Match = lastIndex + 1
-			rf.progress[peer].Next = lastIndex + 2
-		} else {
-			rf.progress[peer].Next = lastIndex + 1
+		if peer != rf.id {
+			rf.progress[peer].Next = noopEntry.Index
 		}
 	}
 
@@ -347,7 +345,42 @@ func (rf *Raft) applier() {
 
 // applyCommand sends commands to state machine by apply channel.
 func (rf *Raft) applyCommand() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
+	if !rf.isLeader() {
+		return
+	}
+
+	l := rf.raftLog
+	if l.applied > l.lastSnapshotIndex {
+		rf.CondInstallSnapshot(l.lastSnapshotTerm, l.lastSnapshotIndex, rf.persister.snapshot)
+	} else if l.applied < l.committed {
+		for idx := l.applied + 1; idx <= l.committed; idx++ {
+			entry := l.EntryAt(idx)
+			applyMsg := ApplyMsg{
+				CommandValid: true,
+				Command:      entry.Data,
+				CommandIndex: entry.Index,
+			}
+
+			rf.applyCh <- applyMsg
+			l.ApplyTo(idx)
+			rf.logger.Infof("%s Apply command: %v, advance applied index to: %v", rf, entry.Data, l.committed)
+		}
+	}
+}
+
+// leaderAppendEntry appends an entry to leader's log.
+func (rf *Raft) leaderAppendEntry(command interface{}) Entry {
+	entryIndex := rf.raftLog.LastIndex() + 1
+	entry := NewEntry(rf.term, entryIndex, command)
+	rf.raftLog.AppendEntry(entry)
+	rf.persist()
+
+	rf.progress[rf.id].Match = entryIndex
+	rf.progress[rf.id].Next = entryIndex + 1
+	return entry
 }
 
 // Make creates a Raft server.

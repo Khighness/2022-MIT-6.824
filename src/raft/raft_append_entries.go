@@ -62,12 +62,13 @@ func (rf *Raft) replicateLogToPeer(peer int, isHeartbeat bool) {
 		if rf.shouldSendInstallSnapshot(peer) {
 			go rf.sendInstallSnapshotToPeer(peer)
 		} else {
+			rf.logger.Infof("%s Replicate log to %d", rf, peer)
 			go rf.sendAppendEntriesToPeer(peer)
 		}
 	}
 }
 
-// shouldSendAppendEntries checks if leader need to send AppendEntriesArgs to the specified peer.
+// shouldSendAppendEntries checks if leader needs to send AppendEntriesArgs to the specified peer.
 func (rf *Raft) shouldSendAppendEntries(isHeartbeat bool, l *RaftLog, prs *Progress) bool {
 	return isHeartbeat || l.LastIndex() > prs.Next || l.committed > prs.Match
 }
@@ -75,7 +76,7 @@ func (rf *Raft) shouldSendAppendEntries(isHeartbeat bool, l *RaftLog, prs *Progr
 // sendAppendEntriesToPeer sends AppendEntriesArgs to the specified peer.
 func (rf *Raft) sendAppendEntriesToPeer(peer int) {
 	rf.mu.Lock()
-	if !rf.isLeader() || rf.shouldSendInstallSnapshot(peer) {
+	if !rf.isLeader() {
 		rf.mu.Unlock()
 		return
 	}
@@ -163,6 +164,7 @@ func (rf *Raft) tryAdvanceCommitted() {
 	if committedQuorum > l.committed && l.EntryAt(committedQuorum).Term == rf.term {
 		rf.raftLog.CommitTo(committedQuorum)
 		rf.logger.Infof("%s Advance committed index to: %d", rf, committedQuorum)
+		rf.notifyApplyCh <- applySignal
 
 		// Sync committed immediately.
 		go rf.replicateLog(false)
@@ -172,8 +174,8 @@ func (rf *Raft) tryAdvanceCommitted() {
 
 // AppendEntries handles AppendEntriesArgs and replies AppendEntriesReply.
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	rf.logger.Infof("%s Receive AEA%+v from peer %d", rf, args, args.LeaderId)
-	defer rf.logger.Infof("%s Send AER%+v to peer %d", rf, reply, args.LeaderId)
+	rf.logger.Debugf("%s Receive AEA%+v from peer %d", rf, args, args.LeaderId)
+	defer rf.logger.Debugf("%s Send AER%+v to peer %d", rf, reply, args.LeaderId)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
