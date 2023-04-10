@@ -122,12 +122,18 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	// 2. Check if the receiver's vote is null.
+	// 2. For all roles: if Term > rf.term, convert to follower.
+	if args.Term > rf.term {
+		rf.becomeFollower(args.Term, None)
+		reply.Term = rf.term
+	}
+
+	// 3. Check if the receiver's vote is null.
 	if rf.vote != None {
 		return
 	}
 
-	// 3. Check if candidate's log is at least as up-to-date as receiver's log.
+	// 4. Check if candidate's log is at least as up-to-date as receiver's log.
 	lastEntry := rf.raftLog.LastEntry()
 	if lastEntry.Term > args.LastLogTerm ||
 		(lastEntry.Term == args.LastLogTerm && lastEntry.Index > args.LastLogIndex) {
