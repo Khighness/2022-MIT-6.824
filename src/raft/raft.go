@@ -353,7 +353,7 @@ func (rf *Raft) applyCommand() {
 	}
 
 	l := rf.raftLog
-	if l.applied > l.lastSnapshotIndex {
+	if l.applied < l.lastSnapshotIndex {
 		rf.CondInstallSnapshot(l.lastSnapshotTerm, l.lastSnapshotIndex, rf.persister.snapshot)
 	} else if l.applied < l.committed {
 		for idx := l.applied + 1; idx <= l.committed; idx++ {
