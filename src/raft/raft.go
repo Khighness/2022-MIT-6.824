@@ -375,7 +375,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.logger = log.NewZapLogger("Raft").Sugar()
 
 	rf.logger.Infof("Start peer [%d] in raft cluster: %v", me, peers)
-
 	rf.becomeFollower(Zero, None)
 	rf.readPersist(persister.ReadRaftState())
 
