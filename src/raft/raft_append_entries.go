@@ -108,6 +108,10 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	if !rf.isLeader() {
+		return
+	}
+
 	if reply.Term > rf.term {
 		rf.logger.Infof("%s AEA term(%d) > current term(%d), become follower at term: %d",
 			rf, reply.Term, rf.term, reply.Term)
@@ -120,6 +124,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 	if !reply.Success {
 		logIndex := reply.LogIndex
 		logTerm := reply.Term
+
 		// Handle the conflict scene.
 		if reply.LogTerm != Zero {
 			l := rf.raftLog
@@ -129,13 +134,11 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 			entryIndex := l.ToEntryIndex(sliceIndex)
 			if entryIndex >= l.FirstIndex() && l.EntryAt(entryIndex).Term == logTerm {
 				logIndex = entryIndex
-			} else {
-				go rf.sendInstallSnapshotToPeer(peer)
 			}
 		}
+
 		rf.progress[peer].Next = logIndex
-		// TODO(Khighness): send immediately
-		go rf.sendAppendEntriesToPeer(peer)
+		go rf.replicateLogToPeer(peer, false)
 		return
 	}
 
