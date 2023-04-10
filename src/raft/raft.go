@@ -194,13 +194,17 @@ func (rf *Raft) readPersist(data []byte) {
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	index := -1
 	term := -1
-	isLeader := true
 
-	// Your code here (2B).
+	if !rf.isLeader() {
+		return index, term, false
+	}
 
-	return index, term, isLeader
+	return index, term, true
 }
 
 // Kill sets the peer to dead.
@@ -215,6 +219,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // confusing debug output. any goroutine with a long-running loop
 // should call killed() to check whether it should stop.
 func (rf *Raft) Kill() {
+	rf.tick.stopElectionTimeoutTicker()
+	rf.tick.stopLogReplicationTicker()
 	atomic.StoreInt32(&rf.dead, 1)
 }
 
@@ -381,7 +387,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.ticker()
 	go rf.applier()
 
-	rf.logger.Infof("%s Raft peer [%d] initializes successfully in %vms", rf, me, time.Since(timeStart).Milliseconds())
-
+	rf.logger.Infof("%s Raft peer [%d] initializes successfully in %vms",
+		rf, me, time.Since(timeStart).Milliseconds())
 	return rf
 }
