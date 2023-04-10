@@ -145,6 +145,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 
 	rf.progress[peer].Match = reply.LogIndex
 	rf.progress[peer].Next = reply.LogIndex + 1
+	rf.logger.Debugf("%s Advance peer [%d] progress, match: %d, next: %d", rf, peer, reply.LogIndex, reply.LogIndex+1)
 	rf.tryAdvanceCommitted()
 }
 

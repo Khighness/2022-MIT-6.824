@@ -206,7 +206,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	rf.logger.Infof("%s Propose command: %v", rf, command)
 	entry := rf.leaderAppendEntry(command)
-	rf.replicateLog(false)
+	go rf.replicateLog(false)
 	return entry.Index, entry.Term, true
 }
 
