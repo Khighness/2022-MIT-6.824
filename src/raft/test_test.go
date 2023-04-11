@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -23,20 +24,14 @@ import (
 const RaftElectionTimeout = 1000 * time.Millisecond
 
 func TestMake(t *testing.T) {
-	persister := MakePersister()
-	r := &Raft{
-		persister: persister,
-		term:      0,
-		vote:      0,
-		raftLog:   NewRaftLog(nil, 0, 0, 0, 0),
+	l := NewRaftLog(nil, 0, 0, 0, 0)
+	for i := 1; i <= 10; i++ {
+		l.AppendEntry(NewEntry(i/3, i, nil))
 	}
-	r.persist()
-
-	applyCh := make(chan ApplyMsg)
-	raft := Make(nil, 1, persister.Copy(), applyCh)
-	log.Printf("%+v", raft)
-	reply := AppendEntriesReply{}
-	log.Printf("%+v", reply)
+	idx := sort.Search(l.Length(), func(i int) bool {
+		return l.EntryAt(i).Term >= 2
+	})
+	log.Println(idx)
 }
 
 func TestInitialElection2A(t *testing.T) {

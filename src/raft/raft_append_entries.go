@@ -62,7 +62,7 @@ func (rf *Raft) replicateLogToPeer(peer int, isHeartbeat bool) {
 		if rf.shouldSendInstallSnapshot(peer) {
 			go rf.sendInstallSnapshotToPeer(peer)
 		} else {
-			rf.logger.Infof("%s Replicate log to peer [%d], entries: %+v", rf, peer, rf.raftLog.entries)
+			rf.logger.Debugf("%s Replicate log to peer [%d], entries: %+v", rf, peer, rf.raftLog.entries)
 			go rf.sendAppendEntriesToPeer(peer)
 		}
 	}
@@ -99,8 +99,6 @@ func (rf *Raft) sendAppendEntriesToPeer(peer int) {
 		return
 	}
 
-	rf.logger.Debugf("%s Send AEA%+v to peer [%d]", rf, args, peer)
-	rf.logger.Debugf("%s Receive AER%+v from peer [%d]", rf, reply, peer)
 	rf.handleAppendEntriesReply(peer, reply)
 }
 
@@ -124,16 +122,19 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 
 	if !reply.Success {
 		logIndex := reply.LogIndex
-		logTerm := reply.Term
+		logTerm := reply.LogTerm
 
 		// Handle the conflict scene.
-		if reply.LogTerm != Zero {
+		if logTerm != Zero {
 			l := rf.raftLog
 			sliceIndex := sort.Search(l.Length(), func(i int) bool {
 				return l.EntryAt(i).Term > logTerm
 			})
 			entryIndex := l.ToEntryIndex(sliceIndex)
-			if entryIndex >= l.FirstIndex() && l.EntryAt(entryIndex).Term == logTerm {
+			rf.logger.Infof("%s Handle conflict log term from peer [%d]: %d, rollback next index to: %d",
+				rf, peer, logTerm, entryIndex)
+
+			if entryIndex > l.FirstIndex() && l.EntryAt(entryIndex).Term == logTerm {
 				logIndex = entryIndex
 			}
 		}
@@ -207,10 +208,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.PrevLogIndex > l.FirstIndex() {
 		prevEntry := l.EntryAt(args.PrevLogIndex)
 		if prevEntry.Term != args.PrevLogTerm {
+			rf.logger.Infof("%s peer [%d] entry at index [%d] is conflict with leader: %d <> %d",
+				rf, rf.id, args.PrevLogIndex, prevEntry.Term, args.PrevLogTerm)
 			reply.LogTerm = prevEntry.Term
 			reply.LogIndex = sort.Search(l.ToSliceIndex(args.PrevLogIndex+1), func(i int) bool {
 				return l.EntryAt(i).Term == prevEntry.Term
 			})
+			return
 		}
 	}
 

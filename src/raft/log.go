@@ -60,8 +60,10 @@ func NewRaftLog(entries []Entry, committed, applied int, lastSnapshotTerm, lastS
 }
 
 // FirstIndex returns the index of the first entry.
+// It is 0 if there is no snapshot.
+// Otherwise, it is the index of last snapshot.
 func (l *RaftLog) FirstIndex() int {
-	return l.entries[0].Index + 1
+	return l.entries[0].Index
 }
 
 // LastIndex returns the index of the last entry.
