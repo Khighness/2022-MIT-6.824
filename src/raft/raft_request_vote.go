@@ -20,6 +20,7 @@ type RequestVoteReply struct {
 // startElection starts a new round of election.
 func (rf *Raft) startElection() {
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	if rf.isLeader() {
 		return
@@ -42,8 +43,6 @@ func (rf *Raft) startElection() {
 		LastLogTerm:  lastEntry.Term,
 	}
 
-	rf.mu.Unlock()
-
 	for peer := range rf.peers {
 		if peer == rf.id {
 			continue
@@ -57,6 +56,7 @@ func (rf *Raft) startElection() {
 func (rf *Raft) sendRequestVoteToPeer(peer int, args *RequestVoteArgs) {
 	rf.mu.Lock()
 	if !rf.isCandidate() {
+		rf.mu.Unlock()
 		return
 	}
 	rf.mu.Unlock()
