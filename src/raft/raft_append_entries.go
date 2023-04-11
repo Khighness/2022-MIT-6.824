@@ -62,7 +62,7 @@ func (rf *Raft) replicateLogToPeer(peer int, isHeartbeat bool) {
 		if rf.shouldSendInstallSnapshot(peer) {
 			go rf.sendInstallSnapshotToPeer(peer)
 		} else {
-			rf.logger.Infof("%s Replicate log to peer [%d]", rf, peer)
+			rf.logger.Infof("%s Replicate log to peer [%d], entries: %+v", rf, peer, rf.raftLog.entries)
 			go rf.sendAppendEntriesToPeer(peer)
 		}
 	}
@@ -143,8 +143,8 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 		return
 	}
 
-	rf.progress[peer].Match = reply.LogIndex
-	rf.progress[peer].Next = reply.LogIndex + 1
+	rf.progress[peer].Match = min(reply.LogIndex, rf.raftLog.LastIndex())
+	rf.progress[peer].Next = rf.progress[peer].Match + 1
 	rf.logger.Debugf("%s Advance peer [%d] progress, match: %d, next: %d", rf, peer, reply.LogIndex, reply.LogIndex+1)
 	rf.tryAdvanceCommitted()
 }
@@ -169,7 +169,6 @@ func (rf *Raft) tryAdvanceCommitted() {
 
 		// Sync committed immediately.
 		go rf.replicateLog(false)
-		return
 	}
 }
 
@@ -215,6 +214,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 	}
 
+	rf.logger.Infof("%s Before AEA, last index: %d, entries: %+v", rf, l.LastIndex(), l.entries)
+	defer func() {
+		rf.logger.Infof("%s After AEA, last index: %d, entries: %+v", rf, rf.raftLog.LastIndex(), rf.raftLog.entries)
+	}()
+
 	// Append leader's new entries.
 	for i, newEnt := range args.Entries {
 		if newEnt.Index < l.FirstIndex() {
@@ -225,19 +229,24 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			// update the existing entry and delete all entries that follow it.
 			entry := l.EntryAt(newEnt.Index)
 			if entry.Term != newEnt.Term {
+				rf.logger.Debugf("%s Update entry: %+v -> %+v", rf, entry, newEnt)
 				l.Update(entry.Index, newEnt)
+				rf.logger.Debugf("%s Remove entry after: %+v", rf, entry)
 				l.RemoveAfter(entry.Index)
 			}
 		} else {
 			// (6) 4. Append any new entries not already in the log.
 			l.AppendEntries(args.Entries[i:])
+			rf.logger.Debugf("%s Append entries: %+v", rf, args.Entries[i:])
 			break
 		}
 	}
 
 	// (7) 5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, lastIndex).
 	if args.LeaderCommit > l.committed {
-		l.CommitTo(min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries)))
+		committed := min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
+		l.CommitTo(committed)
+		rf.logger.Infof("%s Advance committed index to: %d", rf, committed)
 		rf.notifyApplyCh <- applySignal
 	}
 

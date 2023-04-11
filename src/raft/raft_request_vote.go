@@ -63,7 +63,7 @@ func (rf *Raft) sendRequestVoteToPeer(peer int, args *RequestVoteArgs) {
 
 	var reply RequestVoteReply
 	if !rf.sendRequestVote(peer, args, &reply) {
-		rf.logger.Warnf("%s Failed to send RVA to: %d", rf, peer)
+		rf.logger.Warnf("%s Failed to send RVA to peer [%d]", rf, peer)
 		return
 	}
 
