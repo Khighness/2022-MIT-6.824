@@ -204,8 +204,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		return None, None, false
 	}
 
-	rf.logger.Infof("%s Propose command: %v", rf, command)
 	entry := rf.leaderAppendEntry(command)
+	rf.logger.Infof("%s Propose entry: %+v", rf, entry)
 	go rf.replicateLog(false)
 	return entry.Index, entry.Term, true
 }
@@ -319,7 +319,7 @@ func (rf *Raft) becomeLeader() {
 }
 
 // ticker triggers leader to broadcast heartbeat
-// follower or candidate to start election.
+// and follower or candidate to start election.
 func (rf *Raft) ticker() {
 	for rf.alive() {
 		select {
@@ -331,7 +331,7 @@ func (rf *Raft) ticker() {
 	}
 }
 
-// applier listens the notify channel and do applying command.
+// applier listens the notifyApplyCh and do applying command.
 func (rf *Raft) applier() {
 	for rf.alive() {
 		select {
@@ -341,7 +341,7 @@ func (rf *Raft) applier() {
 	}
 }
 
-// applyCommand sends commands to state machine by apply channel.
+// applyCommand sends commands to state machine by applyCh.
 func (rf *Raft) applyCommand() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -360,7 +360,7 @@ func (rf *Raft) applyCommand() {
 
 			rf.applyCh <- applyMsg
 			l.ApplyTo(idx)
-			rf.logger.Infof("%s Apply command: %v, advance applied index to: %v", rf, entry.Data, l.committed)
+			rf.logger.Infof("%s Apply entry: %+v", rf, entry)
 		}
 	}
 }

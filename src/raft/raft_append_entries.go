@@ -62,7 +62,7 @@ func (rf *Raft) replicateLogToPeer(peer int, isHeartbeat bool) {
 		if rf.shouldSendInstallSnapshot(peer) {
 			go rf.sendInstallSnapshotToPeer(peer)
 		} else {
-			rf.logger.Debugf("%s Replicate log to peer [%d], entries: %+v", rf, peer, rf.raftLog.entries)
+			rf.logger.Debugf("%s Replicate log to peer [%d], current entries: %+v", rf, peer, rf.raftLog.entries)
 			go rf.sendAppendEntriesToPeer(peer)
 		}
 	}
@@ -218,9 +218,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 	}
 
-	rf.logger.Infof("%s Before AEA, last index: %d, entries: %+v", rf, l.LastIndex(), l.entries)
+	rf.logger.Debugf("%s Before AEA, last index: %d, entries: %+v", rf, l.LastIndex(), l.entries)
 	defer func() {
-		rf.logger.Infof("%s After AEA, last index: %d, entries: %+v", rf, rf.raftLog.LastIndex(), rf.raftLog.entries)
+		rf.logger.Debugf("%s After AEA, last index: %d, entries: %+v", rf, rf.raftLog.LastIndex(), rf.raftLog.entries)
 	}()
 
 	// Append leader's new entries.
