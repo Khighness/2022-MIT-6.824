@@ -180,6 +180,7 @@ func (rf *Raft) readPersist(data []byte) {
 	rf.term = term
 	rf.vote = vote
 	rf.raftLog = NewRaftLog(entries, committed, applied, lastSnapshotIndex, lastSnapshotTerm)
+	rf.logger.Infof("%s Recover state, term = %d, vote = %d, log = %+v", rf, rf.term, rf.vote, rf.raftLog)
 }
 
 // Start proposes a command in Raft cluster.
@@ -199,6 +200,7 @@ func (rf *Raft) readPersist(data []byte) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	if !rf.isLeader() {
 		return None, None, false
@@ -345,6 +347,7 @@ func (rf *Raft) applier() {
 func (rf *Raft) applyCommand() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	l := rf.raftLog
 	if l.applied < l.FirstIndex() {
@@ -408,8 +411,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.logger = log.NewZapLogger("Raft").Sugar()
 
 	rf.logger.Infof("Start peer [%d] in raft cluster: %v", me, peers)
-	rf.becomeFollower(Zero, None)
 	rf.readPersist(persister.ReadRaftState())
+	rf.becomeFollower(Zero, None)
 
 	go rf.ticker()
 	go rf.applier()

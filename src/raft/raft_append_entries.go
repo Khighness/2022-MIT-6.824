@@ -106,6 +106,7 @@ func (rf *Raft) sendAppendEntriesToPeer(peer int) {
 func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	if !rf.isLeader() {
 		return
@@ -127,6 +128,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 		// Handle the conflict scene.
 		if logTerm != Zero {
 			l := rf.raftLog
+			// Rollback to the index of the first entry on its term.
 			sliceIndex := sort.Search(l.Length(), func(i int) bool {
 				return l.EntryAt(i).Term > logTerm
 			})
@@ -180,6 +182,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	reply.Term = rf.term
 	reply.Success = false
