@@ -399,6 +399,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.id = me
+	rf.role = Follower
+	rf.term = Zero
+	rf.vote = Zero
+	rf.lead = None
 	rf.tick = newTicker()
 	rf.raftLog = NewRaftLog(nil, Zero, Zero, Zero, Zero)
 	rf.progress = make(map[int]*Progress)
@@ -412,7 +416,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.logger.Infof("Start peer [%d] in raft cluster: %v", me, peers)
 	rf.readPersist(persister.ReadRaftState())
-	rf.becomeFollower(Zero, None)
 
 	go rf.ticker()
 	go rf.applier()

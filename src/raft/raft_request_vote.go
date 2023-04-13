@@ -136,6 +136,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	// 2. For all roles: if Term > rf.term, convert to follower.
 	if args.Term > rf.term {
+		rf.logger.Infof("%s RVA term(%d) > current term(%d), become follower at term: %d",
+			rf, args.Term, rf.term, reply.Term)
 		rf.becomeFollower(args.Term, None)
 		reply.Term = rf.term
 	}
