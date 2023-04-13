@@ -10,9 +10,7 @@ package raft
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,17 +20,6 @@ import (
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
 const RaftElectionTimeout = 1000 * time.Millisecond
-
-func TestMake(t *testing.T) {
-	l := NewRaftLog(nil, 0, 0, 0, 0)
-	for i := 1; i <= 10; i++ {
-		l.AppendEntry(NewEntry(i/3, i, nil))
-	}
-	idx := sort.Search(l.Length(), func(i int) bool {
-		return l.EntryAt(i).Term >= 2
-	})
-	log.Println(idx)
-}
 
 func TestInitialElection2A(t *testing.T) {
 	servers := 3

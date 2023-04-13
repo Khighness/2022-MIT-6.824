@@ -1,7 +1,9 @@
 package raft
 
 import (
+	"6.824/labgob"
 	"6.824/log"
+
 	"go.uber.org/zap"
 )
 
@@ -27,25 +29,28 @@ func NewEntry(term, index int, data interface{}) Entry {
 // RaftLog structure.
 // It must be persisted in Raft.
 type RaftLog struct {
-	entries []Entry
+	entries []Entry // current log entries
 
-	committed int
-	applied   int
+	committed int // committed index
+	applied   int // applied index
 
-	lastSnapshotTerm  int
-	lastSnapshotIndex int
+	lastSnapshotTerm  int    // the term of the last entry in snapshot
+	lastSnapshotIndex int    // the index of the last entry in snapshot
+	snapshot          []byte // snapshot data
 
 	logger *zap.SugaredLogger
 }
 
 // NewRaftLog creates a RaftLog instance.
-func NewRaftLog(entries []Entry, committed, applied int, lastSnapshotTerm, lastSnapshotIndex int) *RaftLog {
+func NewRaftLog(entries []Entry, committed, applied int,
+	lastSnapshotTerm, lastSnapshotIndex int, snapshot []byte) *RaftLog {
 	raftLog := &RaftLog{
 		entries:           entries,
 		committed:         committed,
 		applied:           applied,
 		lastSnapshotTerm:  lastSnapshotTerm,
 		lastSnapshotIndex: lastSnapshotIndex,
+		snapshot:          snapshot,
 		logger:            log.NewZapLogger("RaftLog").Sugar(),
 	}
 
@@ -57,6 +62,28 @@ func NewRaftLog(entries []Entry, committed, applied int, lastSnapshotTerm, lastS
 	}
 
 	return raftLog
+}
+
+//  NewRaftLog creates a RaftLog instance by labgob.LabDecoder.
+func NewRaftLogFromDecoder(decoder *labgob.LabDecoder) *RaftLog {
+	var (
+		entries           []Entry
+		committed         int
+		applied           int
+		lastSnapshotIndex int
+		lastSnapshotTerm  int
+		snapshot          []byte
+	)
+	if decoder.Decode(&entries) != nil ||
+		decoder.Decode(&committed) != nil ||
+		decoder.Decode(&applied) != nil ||
+		decoder.Decode(&lastSnapshotIndex) != nil ||
+		decoder.Decode(&lastSnapshotTerm) != nil ||
+		decoder.Decode(&snapshot) != nil {
+		panic("failed to decode raft log")
+	}
+
+	return NewRaftLog(entries, committed, applied, lastSnapshotIndex, lastSnapshotTerm, snapshot)
 }
 
 // FirstIndex returns the index of the first entry.
@@ -148,6 +175,29 @@ func (l *RaftLog) ToSliceIndex(logIndex int) int {
 // Compact removes the entries that have been compacted into snapshot.
 func (l *RaftLog) Compact(index int) {
 
+}
+
+// Encode encodes RaftLog by labgob.LabEncoder.
+func (l *RaftLog) Encode(encoder *labgob.LabEncoder) error {
+	if err := encoder.Encode(l.entries); err != nil {
+		return err
+	}
+	if err := encoder.Encode(l.committed); err != nil {
+		return err
+	}
+	if err := encoder.Encode(l.applied); err != nil {
+		return err
+	}
+	if err := encoder.Encode(l.lastSnapshotIndex); err != nil {
+		return err
+	}
+	if err := encoder.Encode(l.lastSnapshotTerm); err != nil {
+		return err
+	}
+	if err := encoder.Encode(l.snapshot); err != nil {
+		return err
+	}
+	return nil
 }
 
 // validateIndex validates the slice index.

@@ -127,7 +127,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Term = rf.term
 	reply.Voted = false
 
-	// 1. Check if candidate's term is less than the receiver term.
+	// 1. Check if candidate's term is less than the receiver term
 	//    or peer already grants vote to another candidate.
 	if args.Term < rf.term ||
 		(args.Term == rf.term && rf.vote != None && rf.vote != args.CandidateId) {

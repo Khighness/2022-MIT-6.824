@@ -125,19 +125,7 @@ func (rf *Raft) persist() {
 	if err = encoder.Encode(rf.vote); err != nil {
 		rf.logger.Panic(err)
 	}
-	if err = encoder.Encode(rf.raftLog.entries); err != nil {
-		rf.logger.Panic(err)
-	}
-	if err = encoder.Encode(rf.raftLog.committed); err != nil {
-		rf.logger.Panic(err)
-	}
-	if err = encoder.Encode(rf.raftLog.applied); err != nil {
-		rf.logger.Panic(err)
-	}
-	if err = encoder.Encode(rf.raftLog.lastSnapshotIndex); err != nil {
-		rf.logger.Panic(err)
-	}
-	if err = encoder.Encode(rf.raftLog.lastSnapshotTerm); err != nil {
+	if err = rf.raftLog.Encode(encoder); err != nil {
 		rf.logger.Panic(err)
 	}
 
@@ -162,24 +150,12 @@ func (rf *Raft) readPersist(data []byte) {
 	if decoder.Decode(&term) != nil || decoder.Decode(&vote) != nil {
 		rf.logger.Panic("failed to decode raft state from persist data")
 	}
-
-	// Raft log.
-	var (
-		entries           []Entry
-		committed         int
-		applied           int
-		lastSnapshotIndex int
-		lastSnapshotTerm  int
-	)
-	if decoder.Decode(&entries) != nil || decoder.Decode(&committed) != nil || decoder.Decode(&applied) != nil ||
-		decoder.Decode(&lastSnapshotIndex) != nil || decoder.Decode(&lastSnapshotTerm) != nil {
-		rf.logger.Panic("failed to decode raft log from persist data")
-	}
-
-	// Recovery.
 	rf.term = term
 	rf.vote = vote
-	rf.raftLog = NewRaftLog(entries, committed, applied, lastSnapshotIndex, lastSnapshotTerm)
+
+	// Raft log.
+	rf.raftLog = NewRaftLogFromDecoder(decoder)
+
 	rf.logger.Infof("%s Recover state, term = %d, vote = %d, log = %+v", rf, rf.term, rf.vote, rf.raftLog)
 }
 
@@ -404,7 +380,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.vote = Zero
 	rf.lead = None
 	rf.tick = newTicker()
-	rf.raftLog = NewRaftLog(nil, Zero, Zero, Zero, Zero)
+	rf.raftLog = NewRaftLog(nil, Zero, Zero, Zero, Zero, nil)
 	rf.progress = make(map[int]*Progress)
 	for peer := range peers {
 		rf.progress[peer] = &Progress{}
