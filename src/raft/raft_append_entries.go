@@ -136,7 +136,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 			rf.logger.Infof("%s Handle conflict log term from peer [%d]: %d, rollback next index to: %d",
 				rf, peer, logTerm, entryIndex)
 
-			if entryIndex > l.FirstIndex() && l.EntryAt(entryIndex).Term == logTerm {
+			if entryIndex > l.FirstIndex() && entryIndex <= l.LastIndex() && l.EntryAt(entryIndex).Term == logTerm {
 				logIndex = entryIndex
 			}
 		}
