@@ -137,11 +137,13 @@ func (l *RaftLog) EntryAt(logIndex int) Entry {
 	return l.entries[sliceIndex]
 }
 
-// EntriesAfter returns all the entries whose index is after the given index of entry.
+// EntriesAfter returns the entries whose index is after the given index of entry.
 func (l *RaftLog) EntriesAfter(logIndex int) []Entry {
 	sliceIndex := l.ToSliceIndex(logIndex)
 	l.validateIndex(sliceIndex)
-	return l.entries[sliceIndex+1:]
+	entries := make([]Entry, l.LastIndex()-logIndex)
+	copy(entries, l.entries[sliceIndex+1:])
+	return entries
 }
 
 // Update updates the entry at the given index of entry.

@@ -112,9 +112,9 @@ func (rf *Raft) isFollower() bool {
 	return rf.role == Follower
 }
 
-// persist saves Raft's persistent state to stable storage,
+// persistState saves Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
-func (rf *Raft) persist() {
+func (rf *Raft) persistState() {
 	buffer := new(bytes.Buffer)
 	encoder := labgob.NewEncoder(buffer)
 
@@ -132,16 +132,15 @@ func (rf *Raft) persist() {
 	rf.persister.SaveRaftState(buffer.Bytes())
 }
 
-// persistSnapshot saves Raft's snapshot to stable storage.
-func (rf *Raft) persistSnapshot() {
+// persistStateAndSnapshot saves Raft's state and snapshot to stable storage.
+func (rf *Raft) persistStateAndSnapshot() {
+	rf.persistState()
+
 	buffer := new(bytes.Buffer)
 	encoder := labgob.NewEncoder(buffer)
-
-	var err error
-	if err = rf.raftLog.EncodeSnapshot(encoder); err != nil {
+	if err := rf.raftLog.EncodeSnapshot(encoder); err != nil {
 		rf.logger.Panic(err)
 	}
-
 	rf.persister.SaveSnapshot(buffer.Bytes())
 }
 
@@ -193,7 +192,7 @@ func (rf *Raft) readPersist(state []byte, snapshot []byte) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persist()
+	defer rf.persistState()
 
 	if !rf.isLeader() {
 		return None, None, false
@@ -260,7 +259,7 @@ func (rf *Raft) becomeFollower(term int, lead int) {
 	rf.vote = None
 	rf.lead = lead
 
-	rf.persist()
+	rf.persistState()
 	rf.tick.stopLogReplicationTicker()
 	rf.tick.resetElectionTimeoutTicker()
 }
@@ -281,7 +280,7 @@ func (rf *Raft) becomeCandidate() {
 	rf.vote = rf.id
 	rf.ballotBox[rf.id] = true
 
-	rf.persist()
+	rf.persistState()
 	rf.tick.stopLogReplicationTicker()
 	rf.tick.resetElectionTimeoutTicker()
 }
@@ -308,7 +307,7 @@ func (rf *Raft) becomeLeader() {
 	// Broadcast heartbeat immediately。
 	go rf.replicateLog(true)
 
-	rf.persist()
+	rf.persistState()
 	rf.tick.stopElectionTimeoutTicker()
 	rf.tick.resetLogReplicationTicker()
 }
@@ -357,7 +356,7 @@ func (rf *Raft) applyCommand() {
 			l.ApplyTo(idx)
 			rf.logger.Infof("%s Apply entry: %+v", rf, entry)
 		}
-		rf.persist()
+		rf.persistState()
 	}
 }
 
@@ -366,7 +365,7 @@ func (rf *Raft) leaderAppendEntry(command interface{}) Entry {
 	entryIndex := rf.raftLog.LastIndex() + 1
 	entry := NewEntry(rf.term, entryIndex, command)
 	rf.raftLog.AppendEntry(entry)
-	rf.persist()
+	rf.persistState()
 
 	rf.progress[rf.id].Match = entryIndex
 	rf.progress[rf.id].Next = entryIndex + 1

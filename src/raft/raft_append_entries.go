@@ -106,7 +106,7 @@ func (rf *Raft) sendAppendEntriesToPeer(peer int) {
 func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persist()
+	defer rf.persistState()
 
 	if !rf.isLeader() {
 		return
@@ -120,15 +120,20 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 	}
 
 	if !reply.Success {
+		l := rf.raftLog
 		logIndex := reply.LogIndex
 		logTerm := reply.LogTerm
 		rf.logger.Infof("%s Handle conflict scene for peer [%d]: index = %d, term = %d",
 			rf, peer, logIndex, logTerm)
 
+		// Send snapshot to it.
+		if logIndex < l.FirstIndex() {
+			go rf.sendInstallSnapshotToPeer(peer)
+			return
+		}
+
 		// Handle the conflict scene.
 		if logTerm != Zero {
-			l := rf.raftLog
-
 			// Rollback to the index of the first entry on its term.
 			sliceIndex := sort.Search(l.Length(), func(i int) bool {
 				return l.EntryAt(i).Term > logTerm
@@ -142,7 +147,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 			}
 		}
 
-		rf.progress[peer].Next = logIndex
+		rf.progress[peer].Next = max(logIndex, l.FirstIndex()+1)
 		go rf.replicateLogToPeer(peer, false)
 		return
 	}
@@ -189,7 +194,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persist()
+	defer rf.persistState()
 
 	reply.Term = rf.term
 	reply.Success = false
@@ -218,8 +223,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.PrevLogIndex > l.FirstIndex() {
 		prevEntry := l.EntryAt(args.PrevLogIndex)
 		if prevEntry.Term != args.PrevLogTerm {
-			rf.logger.Infof("%s peer [%d] entry at index [%d] is conflict with leader: %d <> %d",
-				rf, rf.id, args.PrevLogIndex, prevEntry.Term, args.PrevLogTerm)
+			rf.logger.Infof("%s Peer [%d] entry{Index=%d, Term=%d} is conflict with Leader entry{Index=%d, Term=%d}",
+				rf, rf.id, args.PrevLogIndex, prevEntry.Term, args.PrevLogIndex, args.PrevLogTerm)
 			reply.LogTerm = prevEntry.Term
 			reply.LogIndex = sort.Search(l.ToSliceIndex(args.PrevLogIndex+1), func(i int) bool {
 				return l.EntryAt(i).Term == prevEntry.Term

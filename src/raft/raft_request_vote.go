@@ -21,7 +21,7 @@ type RequestVoteReply struct {
 func (rf *Raft) startElection() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persist()
+	defer rf.persistState()
 
 	if rf.isLeader() {
 		return
@@ -75,7 +75,7 @@ func (rf *Raft) sendRequestVoteToPeer(peer int, args *RequestVoteArgs) {
 func (rf *Raft) handleRequestVotesReply(peer int, reply RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persist()
+	defer rf.persistState()
 
 	if !rf.isCandidate() {
 		return
@@ -122,7 +122,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persist()
+	defer rf.persistState()
 
 	reply.Term = rf.term
 	reply.Voted = false
