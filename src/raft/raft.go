@@ -125,38 +125,55 @@ func (rf *Raft) persist() {
 	if err = encoder.Encode(rf.vote); err != nil {
 		rf.logger.Panic(err)
 	}
-	if err = rf.raftLog.Encode(encoder); err != nil {
+	if err = rf.raftLog.EncodeState(encoder); err != nil {
 		rf.logger.Panic(err)
 	}
 
-	data := buffer.Bytes()
-	rf.persister.SaveRaftState(data)
+	rf.persister.SaveRaftState(buffer.Bytes())
 }
 
-// readPersist restores previously persisted state.
-func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+// persistSnapshot saves Raft's snapshot to stable storage.
+func (rf *Raft) persistSnapshot() {
+	buffer := new(bytes.Buffer)
+	encoder := labgob.NewEncoder(buffer)
+
+	var err error
+	if err = rf.raftLog.EncodeSnapshot(encoder); err != nil {
+		rf.logger.Panic(err)
+	}
+
+	rf.persister.SaveSnapshot(buffer.Bytes())
+}
+
+// readPersist restores previously persisted state and snapshot.
+func (rf *Raft) readPersist(state []byte, snapshot []byte) {
+	if state == nil || len(state) < 1 {
 		return
 	}
 
-	buffer := bytes.NewBuffer(data)
-	decoder := labgob.NewDecoder(buffer)
+	// Recover state.
+	statBuffer := bytes.NewBuffer(state)
+	statDecoder := labgob.NewDecoder(statBuffer)
 
-	// Raft state.
 	var (
 		term int
 		vote int
 	)
-	if decoder.Decode(&term) != nil || decoder.Decode(&vote) != nil {
+	if statDecoder.Decode(&term) != nil || statDecoder.Decode(&vote) != nil {
 		rf.logger.Panic("failed to decode raft state from persist data")
 	}
 	rf.term = term
 	rf.vote = vote
 
-	// Raft log.
-	rf.raftLog = NewRaftLogFromDecoder(decoder)
+	// Recover log.
+	var snapDecoder *labgob.LabDecoder
+	if len(snapshot) > 0 {
+		snapBuffer := bytes.NewBuffer(snapshot)
+		snapDecoder = labgob.NewDecoder(snapBuffer)
+	}
+	rf.raftLog = NewRaftLogFromDecoder(statDecoder, snapDecoder)
 
-	rf.logger.Infof("%s Recover state, term = %d, vote = %d, log = %+v", rf, rf.term, rf.vote, rf.raftLog)
+	rf.logger.Infof("%s Recover state, term = %d, vote = %d, log = %s", rf, rf.term, rf.vote, rf.raftLog)
 }
 
 // Start proposes a command in Raft cluster.
@@ -323,11 +340,10 @@ func (rf *Raft) applier() {
 func (rf *Raft) applyCommand() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persist()
 
 	l := rf.raftLog
 	if l.applied < l.FirstIndex() {
-		rf.CondInstallSnapshot(l.lastSnapshotTerm, l.lastSnapshotIndex, rf.persister.snapshot)
+		go rf.CondInstallSnapshot(l.lastSnapshotTerm, l.lastSnapshotIndex, rf.persister.snapshot)
 	} else if l.applied < l.committed {
 		for idx := l.applied + 1; idx <= l.committed; idx++ {
 			entry := l.EntryAt(idx)
@@ -341,6 +357,7 @@ func (rf *Raft) applyCommand() {
 			l.ApplyTo(idx)
 			rf.logger.Infof("%s Apply entry: %+v", rf, entry)
 		}
+		rf.persist()
 	}
 }
 
@@ -391,7 +408,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.logger = log.NewZapLogger("Raft").Sugar()
 
 	rf.logger.Infof("Start peer [%d] in raft cluster: %v", me, peers)
-	rf.readPersist(persister.ReadRaftState())
+	rf.readPersist(persister.ReadRaftState(), persister.ReadSnapshot())
 
 	go rf.ticker()
 	go rf.applier()

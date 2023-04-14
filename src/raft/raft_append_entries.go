@@ -113,27 +113,28 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 	}
 
 	if reply.Term > rf.term {
-		rf.logger.Infof("%s AEA term(%d) > current term(%d), become follower at term: %d",
+		rf.logger.Infof("%s AER term(%d) > current term(%d), become follower at term: %d",
 			rf, reply.Term, rf.term, reply.Term)
 		rf.becomeFollower(reply.Term, None)
-		return
-	} else if reply.Term < rf.term {
 		return
 	}
 
 	if !reply.Success {
 		logIndex := reply.LogIndex
 		logTerm := reply.LogTerm
+		rf.logger.Infof("%s Handle conflict scene for peer [%d]: index = %d, term = %d",
+			rf, peer, logIndex, logTerm)
 
 		// Handle the conflict scene.
 		if logTerm != Zero {
 			l := rf.raftLog
+
 			// Rollback to the index of the first entry on its term.
 			sliceIndex := sort.Search(l.Length(), func(i int) bool {
 				return l.EntryAt(i).Term > logTerm
 			})
 			entryIndex := l.ToEntryIndex(sliceIndex)
-			rf.logger.Infof("%s Handle conflict log term from peer [%d]: %d, rollback next index to: %d",
+			rf.logger.Infof("%s Handle conflict log term for peer [%d]: %d, rollback next index to: %d",
 				rf, peer, logTerm, entryIndex)
 
 			if entryIndex > l.FirstIndex() && l.EntryAt(entryIndex).Term == logTerm {
@@ -146,9 +147,15 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 		return
 	}
 
-	rf.progress[peer].Match = min(reply.LogIndex, rf.raftLog.LastIndex())
-	rf.progress[peer].Next = rf.progress[peer].Match + 1
-	rf.logger.Debugf("%s Advance peer [%d] progress, match: %d, next: %d", rf, peer, reply.LogIndex, reply.LogIndex+1)
+	rf.advanceProgress(peer, reply.LogIndex)
+}
+
+// advanceProgress advances the progress of the specified peer.
+func (rf *Raft) advanceProgress(peer int, logIndex int) {
+	prs := rf.progress[peer]
+	prs.Match = min(logIndex, rf.raftLog.LastIndex())
+	prs.Next = prs.Match + 1
+	rf.logger.Debugf("%s Advance peer [%d] progress: %+v", rf, peer, prs)
 	rf.tryAdvanceCommitted()
 }
 
