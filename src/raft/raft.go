@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"6.824/log"
 	"bytes"
 	"fmt"
 	"sync"
@@ -10,7 +9,7 @@ import (
 
 	"6.824/labgob"
 	"6.824/labrpc"
-	_ "6.824/log"
+	"6.824/log"
 
 	"go.uber.org/zap"
 )
@@ -72,7 +71,7 @@ type Raft struct {
 	term    int      // Current term
 	vote    int      // Voted for
 	lead    int      // Leader id
-	raftLog *RaftLog // Raft Log
+	raftLog *RaftLog // Raft log
 
 	ballotBox map[int]bool      // Ballot box
 	progress  map[int]*Progress // Follower's log replication progress
@@ -130,6 +129,7 @@ func (rf *Raft) persistState() {
 	}
 
 	rf.persister.SaveRaftState(buffer.Bytes())
+	rf.logger.Infof("%s Persist state, term = %d, vote = %d, log = %s", rf, rf.term, rf.vote, rf.raftLog)
 }
 
 // persistStateAndSnapshot saves Raft's state and snapshot to stable storage.

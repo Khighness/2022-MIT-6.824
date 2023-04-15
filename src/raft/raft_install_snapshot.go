@@ -7,8 +7,8 @@ package raft
 type InstallSnapshotArgs struct {
 	Term              int    // leader's term
 	LeaderId          int    // leader's id
-	LastSnapshotIndex int    // the index of the first entry that is not in snapshot
-	LastSnapshotTerm  int    // the term of the first entry that is not in snapshot
+	LastIncludedIndex int    // the index of the last entry included in snapshot
+	LastIncludedTerm  int    // the term of the last entry included in snapshot
 	Data              []byte // snapshot's data
 }
 
@@ -23,7 +23,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.mu.Lock()
 	l := rf.raftLog
 	if lastIncludedIndex < l.FirstIndex() {
-		rf.logger.Infof("%s CondInstallSnapshot: snapshot index(%d) <= current snapshot index(%d), ignore",
+		rf.logger.Infof("%s CondInstallSnapshot: snapshot index(%d) < current snapshot index(%d), ignore",
 			rf, lastIncludedIndex, l.FirstIndex())
 		rf.mu.Unlock()
 		return false
@@ -46,8 +46,8 @@ func (rf *Raft) sendInstallSnapshotToPeer(peer int) {
 	args := &InstallSnapshotArgs{
 		Term:              rf.term,
 		LeaderId:          rf.id,
-		LastSnapshotIndex: l.FirstIndex(),
-		LastSnapshotTerm:  l.lastSnapshotTerm,
+		LastIncludedIndex: l.FirstIndex(),
+		LastIncludedTerm:  l.lastSnapshotTerm,
 		Data:              rf.persister.ReadSnapshot(),
 	}
 	rf.mu.Unlock()
@@ -83,12 +83,12 @@ func (rf *Raft) handleInstallSnapshotReply(peer int, args *InstallSnapshotArgs, 
 		return
 	}
 
-	if args.Term != rf.term || args.LastSnapshotIndex != rf.raftLog.FirstIndex() {
+	if args.Term != rf.term || args.LastIncludedIndex != rf.raftLog.FirstIndex() {
 		rf.logger.Infof("%s Raft state has changed, ignore ISR%+v from peer [%d]", rf, reply, peer)
 		return
 	}
 
-	rf.advanceProgress(peer, args.LastSnapshotIndex)
+	rf.advanceProgress(peer, args.LastIncludedIndex)
 }
 
 // InstallSnapshot handles InstallSnapshotArgs and replies InstallSnapshotReply.
@@ -104,15 +104,15 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.tick.resetElectionTimeoutTicker()
 
 	l := rf.raftLog
-	if args.LastSnapshotIndex <= l.FirstIndex() {
+	if args.LastIncludedIndex <= l.FirstIndex() {
 		rf.logger.Infof("%s Receive ISA snapshot index(%d) <= current snapshot index(%d). ignore",
-			rf, args.LastSnapshotIndex, l.FirstIndex())
+			rf, args.LastIncludedIndex, l.FirstIndex())
 		rf.mu.Unlock()
 		return
 	}
 	rf.mu.Unlock()
 
-	rf.doApplyInstallSnapshot(args.LastSnapshotTerm, args.LastSnapshotIndex, args.Data)
+	rf.doApplyInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
 }
 
 // doApplyInstallSnapshot does applying snapshot.
@@ -159,7 +159,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 	l.CompactTo(index)
 	rf.persistStateAndSnapshot(snapshot)
-	rf.logger.Infof("%s Snapshot, Log: %s", rf, l)
+	rf.logger.Infof("%s Snapshot, log: %s", rf, l)
 }
 
 // SendInstallSnapshot calls InstallSnapshot RPC.

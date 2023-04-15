@@ -31,14 +31,15 @@ func NewEntry(term, index int, data interface{}) Entry {
 // RaftLog structure.
 // It must be persisted in Raft.
 type RaftLog struct {
+	// entries[0] is a dummy entry
 	entries []Entry // current log entries
 
 	committed int // committed index
 	applied   int // applied index
 
 	// Redundant storage: meta data of last snapshot
-	lastSnapshotTerm  int // the term of the last snapshot
-	lastSnapshotIndex int // the index of the last snapshot (not contained in snapshot)
+	lastSnapshotTerm  int // the index of the last entry included in snapshot
+	lastSnapshotIndex int // the term of the last entry included in snapshot
 
 	// NOTE: RaftLog should not stores the snapshot data.
 	// Because there is limit for the log size: MAXLOGSIZE.
@@ -195,11 +196,15 @@ func (l *RaftLog) CompactTo(index int) {
 		return
 	}
 
+	l.lastSnapshotTerm = l.EntryAt(index).Term
 	l.committed = max(l.committed, index)
 	l.applied = max(l.applied, index)
-	l.entries = l.entries[index-l.lastSnapshotIndex:]
+	l.entries = l.entries[index-l.lastSnapshotIndex+1:]
 	l.lastSnapshotIndex = index
-	l.lastSnapshotTerm = l.EntryAt(index).Term
+
+	newEnts := make([]Entry, 1)
+	newEnts[0] = Entry{Term: l.lastSnapshotTerm, Index: l.lastSnapshotIndex}
+	l.entries = append(newEnts, l.entries...)
 }
 
 // ApplySnapshot applies the snapshot and maybe return a new instance.

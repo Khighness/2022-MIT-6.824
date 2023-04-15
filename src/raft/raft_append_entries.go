@@ -180,8 +180,8 @@ func (rf *Raft) tryAdvanceCommitted() {
 		i++
 	}
 	sort.Sort(match)
-
 	committedQuorum := match[(total-1)/2]
+
 	l := rf.raftLog
 	if committedQuorum > l.committed && l.EntryAt(committedQuorum).Term == rf.term {
 		rf.raftLog.CommitTo(committedQuorum)
@@ -273,6 +273,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		l.CommitTo(committed)
 		rf.logger.Infof("%s Advance committed index to: %d", rf, committed)
 		rf.notifyApplyCh <- applySignal
+	}
+
+	// (8) Handle corner case: multiple leaders in the cluster.
+	if rf.isLeader() && args.LeaderCommit >= l.committed {
+		rf.becomeFollower(args.Term, args.LeaderId)
 	}
 
 	reply.Success = true

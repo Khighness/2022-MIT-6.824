@@ -203,6 +203,7 @@ func (cfg *config) ingestSnap(i int, snapshot []byte, index int) string {
 		cfg.logs[i][j] = xlog[j]
 	}
 	cfg.lastApplied[i] = lastIncludedIndex
+	DPrintf("s[%d] apply to: %d (snapshot)", i, lastIncludedIndex)
 	return ""
 }
 
@@ -242,6 +243,7 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 
 			cfg.mu.Lock()
 			cfg.lastApplied[i] = m.CommandIndex
+			DPrintf("s[%d] apply to: %d (command)", i, m.CommandIndex)
 			cfg.mu.Unlock()
 
 			if (m.CommandIndex+1)%SnapShotInterval == 0 {
