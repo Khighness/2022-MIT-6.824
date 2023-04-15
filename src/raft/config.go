@@ -307,7 +307,7 @@ func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
 		snapshot := cfg.saved[i].ReadSnapshot()
 		if snapshot != nil && len(snapshot) > 0 {
 			// mimic KV server and process snapshot now.
-			// ideally Raft should send it up on applyCh...
+			// ideally Raft should send it up on applyCh...]
 			err := cfg.ingestSnap(i, snapshot, -1)
 			if err != "" {
 				cfg.t.Fatal(err)
@@ -360,7 +360,7 @@ func (cfg *config) cleanup() {
 
 // attach server i to the net.
 func (cfg *config) connect(i int) {
-	fmt.Printf("connect(%d)\n", i)
+	DPrintf("connect(%d)\n", i)
 
 	cfg.connected[i] = true
 
@@ -383,7 +383,7 @@ func (cfg *config) connect(i int) {
 
 // detach server i from the net.
 func (cfg *config) disconnect(i int) {
-	fmt.Printf("disconnect(%d)\n", i)
+	DPrintf("disconnect(%d)\n", i)
 
 	cfg.connected[i] = false
 

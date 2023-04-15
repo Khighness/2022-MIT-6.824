@@ -161,6 +161,9 @@ func (rf *Raft) readPersist(state []byte) {
 	// Recover log.
 	rf.raftLog = NewRaftLogFromDecoder(statDecoder)
 
+	// Peer maybe need to apply entries.
+	rf.notifyApplyCh <- applySignal
+
 	rf.logger.Infof("%s Recover state, term = %d, vote = %d, log = %s", rf, rf.term, rf.vote, rf.raftLog)
 }
 
@@ -331,8 +334,6 @@ func (rf *Raft) applyCommand() {
 
 	if l.applied < l.committed {
 		for idx := l.applied + 1; idx <= l.committed; idx++ {
-			rf.logger.Debugf("%s ApplyCommand, applied: %d, committed: %d", rf, l.applied, l.committed)
-
 			entry := l.EntryAt(idx)
 			rf.mu.Unlock()
 
@@ -346,7 +347,6 @@ func (rf *Raft) applyCommand() {
 
 			rf.mu.Lock()
 			l.ApplyTo(idx)
-			rf.logger.Debugf("%s Advance applied index to: %d", rf, idx)
 			rf.persistState()
 			rf.logger.Infof("%s Apply entry: %+v", rf, entry)
 		}

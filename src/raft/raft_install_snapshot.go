@@ -21,10 +21,8 @@ type InstallSnapshotReply struct {
 // have more recent info since it communicate the snapshot on applyCh.
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	rf.mu.Lock()
-	l := rf.raftLog
-	if lastIncludedIndex < l.FirstIndex() {
-		rf.logger.Infof("%s CondInstallSnapshot: snapshot index(%d) < current snapshot index(%d), ignore",
-			rf, lastIncludedIndex, l.FirstIndex())
+	if !rf.isLastIncludedIndexValid(lastIncludedIndex) {
+		rf.logger.Infof("%s CondInstallSnapshot, log: %s, invalid index: %d", rf, rf.raftLog, lastIncludedIndex)
 		rf.mu.Unlock()
 		return false
 	}
@@ -32,6 +30,14 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 
 	rf.doApplyInstallSnapshot(lastIncludedTerm, lastIncludedIndex, snapshot)
 	return true
+}
+
+// isLastIncludedIndexValid checks if the lastIncludedIndex is valid.
+func (rf *Raft) isLastIncludedIndexValid(lastIncludedIndex int) bool {
+	l := rf.raftLog
+	return lastIncludedIndex >= l.lastIncludedIndex && // The lastIncludedIndex can not be less than the old one.
+		lastIncludedIndex >= l.committed && // The lastIncludedIndex can not be less the committed index.
+		l.committed == l.applied // All the committed entries must been applied.
 }
 
 // sendInstallSnapshotToPeer sends InstallSnapshotArgs to the specified peer.
@@ -46,8 +52,8 @@ func (rf *Raft) sendInstallSnapshotToPeer(peer int) {
 	args := &InstallSnapshotArgs{
 		Term:              rf.term,
 		LeaderId:          rf.id,
-		LastIncludedIndex: l.FirstIndex(),
-		LastIncludedTerm:  l.lastSnapshotTerm,
+		LastIncludedIndex: l.lastIncludedIndex,
+		LastIncludedTerm:  l.lastIncludedTerm,
 		Data:              rf.persister.ReadSnapshot(),
 	}
 	rf.mu.Unlock()
@@ -63,8 +69,7 @@ func (rf *Raft) sendInstallSnapshotToPeer(peer int) {
 
 // shouldSendInstallSnapshot checks if leader need to send InstallSnapshotArgs to the given peer.
 func (rf *Raft) shouldSendInstallSnapshot(peer int) bool {
-	prevLogIndex := rf.progress[peer].Match
-	return prevLogIndex < rf.raftLog.FirstIndex()
+	return rf.progress[peer].Match < rf.raftLog.FirstIndex()
 }
 
 // handleInstallSnapshotReply handles InstallSnapshotReply from the specified peer.
@@ -97,16 +102,18 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	defer rf.logger.Debugf("%s Send ISR%+v to peer [%d]", rf, reply, args.LeaderId)
 
 	rf.mu.Lock()
-	if args.Term > rf.term {
-		rf.becomeFollower(args.Term, args.LeaderId)
-	}
 	reply.Term = rf.term
+	if args.Term < rf.term {
+		rf.mu.Unlock()
+		return
+	} else if args.Term > rf.term {
+		rf.becomeFollower(args.Term, args.LeaderId)
+		reply.Term = rf.term
+	}
 	rf.tick.resetElectionTimeoutTicker()
 
-	l := rf.raftLog
-	if args.LastIncludedIndex <= l.FirstIndex() {
-		rf.logger.Infof("%s Receive ISA snapshot index(%d) <= current snapshot index(%d). ignore",
-			rf, args.LastIncludedIndex, l.FirstIndex())
+	if !rf.isLastIncludedIndexValid(args.LastIncludedIndex) {
+		rf.logger.Infof("%s InstallSnapshot, log: %s, invalid index: %d", rf, rf.raftLog, args.LastIncludedIndex)
 		rf.mu.Unlock()
 		return
 	}
@@ -137,7 +144,7 @@ func (rf *Raft) doApplyInstallSnapshot(lastSnapshotTerm int, lastSnapshotIndex i
 		SnapshotIndex: lastSnapshotIndex,
 	}
 	rf.applyCh <- applyMsg
-	rf.logger.Infof("%s Apply InstallSnapshot: [SnapshotTerm=%d, SnapshotIndex=%d]",
+	rf.logger.Infof("%s Apply snapshot: [lastSnapshotTerm=%d, lastSnapshotIndex=%d]",
 		rf, lastSnapshotTerm, lastSnapshotIndex)
 }
 
@@ -152,7 +159,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 	l := rf.raftLog
 	if index <= l.FirstIndex() || index > l.LastIndex() {
-		rf.logger.Infof("%s Snapshot: snapshot index(%d) is out bound of (%d, %d], ignore",
+		rf.logger.Warnf("%s Snapshot: snapshot index(%d) is out bound of (%d, %d], ignore",
 			rf, index, l.FirstIndex(), l.LastIndex())
 		return
 	}

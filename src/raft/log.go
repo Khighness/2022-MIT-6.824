@@ -31,15 +31,25 @@ func NewEntry(term, index int, data interface{}) Entry {
 // RaftLog structure.
 // It must be persisted in Raft.
 type RaftLog struct {
-	// entries[0] is a dummy entry
+	// entries is a persistent state.
+	// entries[0] is a dummy entry which stores the meta data of last snapshot.
+	// entries[1:] are the entries that has not been compacted into the snapshot.
 	entries []Entry // current log entries
 
+	// NOTE: committed index and applied index are volatile state.
+	// committed must be persisted in stable storage.
 	committed int // committed index
-	applied   int // applied index
+	// applied should not be persisted in stable storage.
+	// Because if there is snapshot in unit test (2D),
+	// the call chain of Raft initialization  is: config.start1() -> config.ingestSnap().
+	// So config will use RaftLog.lastIncludedIndex as applied index instead of RaftLog.applied.
+	applied int // applied index
 
-	// Redundant storage: meta data of last snapshot
-	lastSnapshotTerm  int // the index of the last entry included in snapshot
-	lastSnapshotIndex int // the term of the last entry included in snapshot
+	// Redundant storage: meta data of last snapshot.
+	// lastIncludedTerm is the index of the last entry included in snapshot.
+	lastIncludedTerm int // entries[0].Term
+	// lastIncludedIndex is the term of the last entry included in snapshot.
+	lastIncludedIndex int // entries[0].Index)
 
 	// NOTE: RaftLog should not stores the snapshot data.
 	// Because there is limit for the log size: MAXLOGSIZE.
@@ -53,12 +63,12 @@ func NewRaftLog(entries []Entry, committed, applied int, lastSnapshotTerm, lastS
 		entries:           entries,
 		committed:         committed,
 		applied:           applied,
-		lastSnapshotTerm:  lastSnapshotTerm,
-		lastSnapshotIndex: lastSnapshotIndex,
+		lastIncludedTerm:  lastSnapshotTerm,
+		lastIncludedIndex: lastSnapshotIndex,
 		logger:            log.NewZapLogger("RaftLog").Sugar(),
 	}
 
-	if len(entries) == 0 { // dummy entry which stores the meta data of last snapshot
+	if len(entries) == 0 { // Create a dummy entry.
 		raftLog.entries = []Entry{{
 			Term:  lastSnapshotTerm,
 			Index: lastSnapshotIndex,
@@ -73,20 +83,18 @@ func NewRaftLogFromDecoder(statDecoder *labgob.LabDecoder) *RaftLog {
 	var (
 		entries           []Entry
 		committed         int
-		applied           int
-		lastSnapshotIndex int
-		lastSnapshotTerm  int
+		lastIncludedIndex int
+		lastIncludedTerm  int
 	)
 
 	if statDecoder.Decode(&entries) != nil ||
 		statDecoder.Decode(&committed) != nil ||
-		statDecoder.Decode(&applied) != nil ||
-		statDecoder.Decode(&lastSnapshotIndex) != nil ||
-		statDecoder.Decode(&lastSnapshotTerm) != nil {
+		statDecoder.Decode(&lastIncludedIndex) != nil ||
+		statDecoder.Decode(&lastIncludedTerm) != nil {
 		panic("failed to decode raft log's state")
 	}
 
-	return NewRaftLog(entries, committed, applied, lastSnapshotTerm, lastSnapshotIndex)
+	return NewRaftLog(entries, committed, lastIncludedIndex, lastIncludedTerm, lastIncludedIndex)
 }
 
 // String returns RaftLog's string.
@@ -196,21 +204,21 @@ func (l *RaftLog) CompactTo(index int) {
 		return
 	}
 
-	l.lastSnapshotTerm = l.EntryAt(index).Term
+	l.lastIncludedTerm = l.EntryAt(index).Term
 	l.committed = max(l.committed, index)
 	l.applied = max(l.applied, index)
-	l.entries = l.entries[index-l.lastSnapshotIndex+1:]
-	l.lastSnapshotIndex = index
+	l.entries = l.entries[index-l.lastIncludedIndex+1:]
+	l.lastIncludedIndex = index
 
-	newEnts := make([]Entry, 1)
-	newEnts[0] = Entry{Term: l.lastSnapshotTerm, Index: l.lastSnapshotIndex}
-	l.entries = append(newEnts, l.entries...)
+	newEntries := make([]Entry, 1)
+	newEntries[0] = Entry{Term: l.lastIncludedTerm, Index: l.lastIncludedIndex}
+	l.entries = append(newEntries, l.entries...)
 }
 
 // ApplySnapshot applies the snapshot and maybe return a new instance.
 func (l *RaftLog) Apply(index int, term int) *RaftLog {
 	if index <= l.FirstIndex() {
-		l.logger.Warnf("Apply: index(%d) <= lastSnapshotIndex(%d)", index, l.FirstIndex())
+		l.logger.Warnf("Apply: index(%d) <= lastIncludedIndex(%d)", index, l.FirstIndex())
 		return l
 	}
 
@@ -232,13 +240,10 @@ func (l *RaftLog) Encode(encoder *labgob.LabEncoder) error {
 	if err = encoder.Encode(l.committed); err != nil {
 		return err
 	}
-	if err = encoder.Encode(l.applied); err != nil {
+	if err = encoder.Encode(l.lastIncludedIndex); err != nil {
 		return err
 	}
-	if err = encoder.Encode(l.lastSnapshotIndex); err != nil {
-		return err
-	}
-	if err = encoder.Encode(l.lastSnapshotTerm); err != nil {
+	if err = encoder.Encode(l.lastIncludedTerm); err != nil {
 		return err
 	}
 	return nil
