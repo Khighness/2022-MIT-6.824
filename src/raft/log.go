@@ -182,10 +182,11 @@ func (l *RaftLog) ToSliceIndex(logIndex int) int {
 	return logIndex - l.entries[0].Index
 }
 
-// Compact compacts the entries.
-func (l *RaftLog) Compact(index int) {
+// CompactTo compacts the entries.
+// Just removes the entries whose index is less than the given index.
+func (l *RaftLog) CompactTo(index int) {
 	if index <= l.FirstIndex() || index > l.LastIndex() {
-		l.logger.Warnf("Compact: index(%d) is out bound of (%d, %d]", index, l.FirstIndex(), l.LastIndex())
+		l.logger.Warnf("CompactTo: index(%d) is out bound of (%d, %d]", index, l.FirstIndex(), l.LastIndex())
 		return
 	}
 
@@ -194,18 +195,20 @@ func (l *RaftLog) Compact(index int) {
 	l.lastSnapshotTerm = l.EntryAt(index).Term
 }
 
-// ApplySnapshot applies the snapshot.
-func (l *RaftLog) Apply(index int, term int) {
+// ApplySnapshot applies the snapshot and maybe return a new instance.
+func (l *RaftLog) Apply(index int, term int) *RaftLog {
 	if index <= l.FirstIndex() {
 		l.logger.Warnf("Apply: index(%d) <= lastSnapshotIndex(%d)", index, l.FirstIndex())
-		return
+		return l
 	}
 
 	if index > l.LastIndex() {
 		l = NewRaftLog(nil, index, index, term, index)
 	} else {
-		l.Compact(index)
+		l.CompactTo(index)
 	}
+
+	return l
 }
 
 // Encode encodes RaftLog's state by labgob.LabEncoder.

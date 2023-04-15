@@ -24,7 +24,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 
 	l := rf.raftLog
 	if lastIncludedIndex <= l.FirstIndex() {
-		rf.logger.Infof("%r CondInstallSnapshot: snapshot index(%d) <= current snapshot index(%d), ignore",
+		rf.logger.Infof("%s CondInstallSnapshot: snapshot index(%d) <= current snapshot index(%d), ignore",
 			rf, lastIncludedIndex, l.FirstIndex())
 		rf.mu.Unlock()
 		return false
@@ -42,7 +42,8 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 		SnapshotIndex: lastIncludedIndex,
 	}
 	rf.applyCh <- applyMsg
-	rf.logger.Infof("%s Apply snapshot: %+v", rf, applyMsg)
+	rf.logger.Infof("%s Apply snapshot: [SnapshotTerm=%d, SnapshotIndex=%d]",
+		rf, lastIncludedTerm, lastIncludedTerm)
 	return true
 }
 
@@ -82,7 +83,7 @@ func (rf *Raft) shouldSendInstallSnapshot(peer int) bool {
 // handleInstallSnapshotReply handles InstallSnapshotReply from the specified peer.
 func (rf *Raft) handleInstallSnapshotReply(peer int, args *InstallSnapshotArgs, reply InstallSnapshotReply) {
 	rf.mu.Lock()
-	defer rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	if !rf.isLeader() {
 		return
@@ -124,9 +125,9 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		return
 	}
 
-	l.Apply(args.LastIncludedIndex, args.LastIncludedTerm)
-	rf.persistStateAndSnapshot(rf.persister.ReadSnapshot())
-	rf.logger.Infof("%s InstallSnapshot, Log: %s", rf, l)
+	rf.raftLog = l.Apply(args.LastIncludedIndex, args.LastIncludedTerm)
+	rf.persistStateAndSnapshot(args.Data)
+	rf.logger.Infof("%s InstallSnapshot, Log: %s", rf, rf.raftLog)
 	rf.mu.Unlock()
 
 	applyMsg := ApplyMsg{
@@ -136,7 +137,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		SnapshotIndex: args.LastIncludedIndex,
 	}
 	rf.applyCh <- applyMsg
-	rf.logger.Infof("%s Apply snapshot: %+v", rf, applyMsg)
+	rf.logger.Infof("%s Apply snapshot: [SnapshotTerm=%d, SnapshotIndex=%d]",
+		rf, args.LastIncludedTerm, args.LastIncludedTerm)
 }
 
 // Snapshot is a proactive action of the upper level (eg. kv server).
@@ -155,7 +157,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 		return
 	}
 
-	l.Compact(index)
+	l.CompactTo(index)
 	rf.persistStateAndSnapshot(snapshot)
 	rf.logger.Infof("%s Snapshot, Log: %s", rf, l)
 }
