@@ -21,29 +21,16 @@ type InstallSnapshotReply struct {
 // have more recent info since it communicate the snapshot on applyCh.
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	rf.mu.Lock()
-
 	l := rf.raftLog
-	if lastIncludedIndex <= l.FirstIndex() {
+	if lastIncludedIndex < l.FirstIndex() {
 		rf.logger.Infof("%s CondInstallSnapshot: snapshot index(%d) <= current snapshot index(%d), ignore",
 			rf, lastIncludedIndex, l.FirstIndex())
 		rf.mu.Unlock()
 		return false
 	}
-
-	l.Apply(lastIncludedIndex, lastIncludedTerm)
-	rf.persistStateAndSnapshot(snapshot)
-	rf.logger.Infof("%s InstallSnapshot, Log: %s", rf, l)
 	rf.mu.Unlock()
 
-	applyMsg := ApplyMsg{
-		SnapshotValid: true,
-		Snapshot:      snapshot,
-		SnapshotTerm:  lastIncludedTerm,
-		SnapshotIndex: lastIncludedIndex,
-	}
-	rf.applyCh <- applyMsg
-	rf.logger.Infof("%s Apply snapshot: [SnapshotTerm=%d, SnapshotIndex=%d]",
-		rf, lastIncludedTerm, lastIncludedTerm)
+	rf.doApplyInstallSnapshot(lastIncludedTerm, lastIncludedIndex, snapshot)
 	return true
 }
 
@@ -110,7 +97,6 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	defer rf.logger.Debugf("%s Send ISR%+v to peer [%d]", rf, reply, args.LeaderId)
 
 	rf.mu.Lock()
-
 	if args.Term > rf.term {
 		rf.becomeFollower(args.Term, args.LeaderId)
 	}
@@ -119,26 +105,40 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	l := rf.raftLog
 	if args.LastIncludedIndex <= l.FirstIndex() {
-		rf.logger.Infof("%r Receive ISA snapshot index(%d) <= current snapshot index(%d). ignore",
+		rf.logger.Infof("%s Receive ISA snapshot index(%d) <= current snapshot index(%d). ignore",
 			rf, args.LastIncludedIndex, l.FirstIndex())
 		rf.mu.Unlock()
 		return
 	}
+	rf.mu.Unlock()
 
-	rf.raftLog = l.Apply(args.LastIncludedIndex, args.LastIncludedTerm)
-	rf.persistStateAndSnapshot(args.Data)
-	rf.logger.Infof("%s InstallSnapshot, Log: %s", rf, rf.raftLog)
+	rf.doApplyInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
+}
+
+// doApplyInstallSnapshot does applying snapshot.
+// It is called by CondInstallSnapshot or InstallSnapshot.
+func (rf *Raft) doApplyInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) {
+	rf.mu.Lock()
+	l := rf.raftLog
+	if lastIncludedIndex <= l.FirstIndex() {
+		rf.mu.Unlock()
+		return
+	}
+
+	rf.raftLog = l.Apply(lastIncludedIndex, lastIncludedTerm)
+	rf.persistStateAndSnapshot(snapshot)
+	rf.logger.Infof("%s ApplyInstallSnapshot, old log: %s, new Log: %s", rf, l, rf.raftLog)
 	rf.mu.Unlock()
 
 	applyMsg := ApplyMsg{
 		SnapshotValid: true,
-		Snapshot:      args.Data,
-		SnapshotTerm:  args.LastIncludedTerm,
-		SnapshotIndex: args.LastIncludedIndex,
+		Snapshot:      snapshot,
+		SnapshotTerm:  lastIncludedTerm,
+		SnapshotIndex: lastIncludedIndex,
 	}
 	rf.applyCh <- applyMsg
 	rf.logger.Infof("%s Apply snapshot: [SnapshotTerm=%d, SnapshotIndex=%d]",
-		rf, args.LastIncludedTerm, args.LastIncludedTerm)
+		rf, lastIncludedTerm, lastIncludedTerm)
 }
 
 // Snapshot is a proactive action of the upper level (eg. kv server).
