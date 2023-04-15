@@ -190,6 +190,8 @@ func (l *RaftLog) CompactTo(index int) {
 		return
 	}
 
+	l.committed = max(l.committed, index)
+	l.applied = max(l.applied, index)
 	l.entries = l.entries[index-l.lastSnapshotIndex:]
 	l.lastSnapshotIndex = index
 	l.lastSnapshotTerm = l.EntryAt(index).Term
