@@ -142,7 +142,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 		if logTerm != Zero {
 			// Rollback to the index of the first entry on its term.
 			sliceIndex := sort.Search(l.Length(), func(i int) bool {
-				return l.EntryAt(i).Term > logTerm
+				return l.Get(i).Term > logTerm
 			})
 			entryIndex := l.ToEntryIndex(sliceIndex)
 			rf.logger.Infof("%s Handle conflict log term for peer [%d]: %d, rollback next index to: %d",
@@ -233,7 +233,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				rf, rf.id, args.PrevLogIndex, prevEntry.Term, args.PrevLogIndex, args.PrevLogTerm)
 			reply.LogTerm = prevEntry.Term
 			reply.LogIndex = sort.Search(l.ToSliceIndex(args.PrevLogIndex+1), func(i int) bool {
-				return l.EntryAt(i).Term == prevEntry.Term
+				return l.Get(i).Term == prevEntry.Term
 			})
 			return
 		}

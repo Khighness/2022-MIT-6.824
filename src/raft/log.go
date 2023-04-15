@@ -126,6 +126,11 @@ func (l *RaftLog) AppendEntries(entries []Entry) {
 	l.entries = append(l.entries, entries...)
 }
 
+// Get returns the entry corresponding to the slice index.
+func (l *RaftLog) Get(sliceIndex int) Entry {
+	return l.entries[sliceIndex]
+}
+
 // EntryAt returns the entry corresponding to the index of entry.
 func (l *RaftLog) EntryAt(logIndex int) Entry {
 	sliceIndex := l.ToSliceIndex(logIndex)
