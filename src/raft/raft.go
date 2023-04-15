@@ -329,16 +329,14 @@ func (rf *Raft) applyCommand() {
 	rf.mu.Lock()
 	l := rf.raftLog
 
-	if l.applied < l.FirstIndex() {
-		rf.mu.Unlock()
-		go rf.CondInstallSnapshot(l.lastSnapshotTerm, l.lastSnapshotIndex, rf.persister.snapshot)
-		return
-	}
-
-	rf.mu.Unlock()
 	if l.applied < l.committed {
 		for idx := l.applied + 1; idx <= l.committed; idx++ {
+			rf.logger.Debugf("%s ApplyCommand, applied: %d, committed: %d", rf, l.applied, l.committed)
+
 			entry := l.EntryAt(idx)
+			rf.mu.Unlock()
+
+			// Don't use applyCh in lock.
 			applyMsg := ApplyMsg{
 				CommandValid: true,
 				Command:      entry.Data,
@@ -348,14 +346,13 @@ func (rf *Raft) applyCommand() {
 
 			rf.mu.Lock()
 			l.ApplyTo(idx)
-			rf.mu.Unlock()
+			rf.logger.Debugf("%s Advance applied index to: %d", rf, idx)
+			rf.persistState()
 			rf.logger.Infof("%s Apply entry: %+v", rf, entry)
 		}
-
-		rf.mu.Lock()
-		rf.persistState()
-		rf.mu.Unlock()
 	}
+
+	rf.mu.Unlock()
 }
 
 // leaderAppendEntry appends an entry to leader's log.

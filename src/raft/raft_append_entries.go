@@ -81,6 +81,12 @@ func (rf *Raft) sendAppendEntriesToPeer(peer int) {
 		return
 	}
 
+	if rf.shouldSendInstallSnapshot(peer) {
+		rf.mu.Unlock()
+		go rf.sendInstallSnapshotToPeer(peer)
+		return
+	}
+
 	prevEntry := rf.raftLog.EntryAt(rf.progress[peer].Next - 1)
 	entries := rf.raftLog.EntriesAfter(prevEntry.Index)
 	args := &AppendEntriesArgs{
