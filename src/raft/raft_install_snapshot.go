@@ -80,7 +80,7 @@ func (rf *Raft) sendInstallSnapshotToPeer(peer int) {
 
 // shouldSendInstallSnapshot checks if leader need to send InstallSnapshotArgs to the given peer.
 func (rf *Raft) shouldSendInstallSnapshot(peer int) bool {
-	return rf.progress[peer].Match < rf.raftLog.FirstIndex()
+	return rf.progress[peer].Next-1 < rf.raftLog.FirstIndex()
 }
 
 // handleInstallSnapshotReply handles InstallSnapshotReply from the specified peer.

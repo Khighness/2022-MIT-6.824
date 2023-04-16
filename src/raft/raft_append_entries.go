@@ -166,7 +166,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 			}
 		}
 
-		rf.progress[peer].Next = max(logIndex, l.FirstIndex()+1)
+		rf.progress[peer].Next = logIndex
 		go rf.sendAppendEntriesToPeer(peer)
 		return
 	}

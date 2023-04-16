@@ -228,6 +228,8 @@ func (l *RaftLog) Apply(index int, term int) *RaftLog {
 		l.CompactTo(index)
 	}
 
+	l.committed = index
+	l.applied = index
 	return l
 }
 

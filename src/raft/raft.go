@@ -76,8 +76,9 @@ type Raft struct {
 	ballotBox map[int]bool      // Ballot box
 	progress  map[int]*Progress // Follower's log replication progress
 
-	// applyCh cannot be used in lock
-	applyCh       chan ApplyMsg // Used to send command to state machine
+	// applyCh cannot be used in lock.
+	applyCh chan ApplyMsg // Used to send command to state machine
+	// notifyApplyCh should be set to a relatively large value to avoid blocking.
 	notifyApplyCh chan struct{} // Used to notify leader apply command
 
 	logger *zap.SugaredLogger
@@ -130,7 +131,7 @@ func (rf *Raft) persistState() {
 	}
 
 	rf.persister.SaveRaftState(buffer.Bytes())
-	rf.logger.Infof("%s Persist state, term = %d, vote = %d, log = %s", rf, rf.term, rf.vote, rf.raftLog)
+	rf.logger.Debugf("%s Persist state, term = %d, vote = %d, log = %s", rf, rf.term, rf.vote, rf.raftLog)
 }
 
 // persistStateAndSnapshot saves Raft's state and snapshot to stable storage.
@@ -141,6 +142,9 @@ func (rf *Raft) persistStateAndSnapshot(snapshot []byte) {
 
 // readPersist restores previously persisted state and snapshot.
 func (rf *Raft) readPersist(state []byte) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	if state == nil || len(state) < 1 {
 		return
 	}
@@ -399,7 +403,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	}
 
 	rf.applyCh = applyCh
-	rf.notifyApplyCh = make(chan struct{}, 10)
+	rf.notifyApplyCh = make(chan struct{}, 300)
 	rf.logger = log.NewZapLogger("Raft").Sugar()
 
 	rf.logger.Infof("Start peer [%d] in raft cluster: %v", me, peers)
