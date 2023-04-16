@@ -3,11 +3,11 @@
 ## Labs
 
 - [ ] [Lab 1: MapReduce]()
-- [ ] [Lab 2: Raft]()
-  - [ ] Lab 2A: Leader Election 
-  - [ ] Lab 2B: Log Replication 
-  - [ ] Lab 2C: Persistence
-  - [ ] Lab 2D: Log Compaction
+- [x] [Lab 2: Raft](https://github.com/Khighness/2022-MIT-6.824/tree/master/src/raft)
+  - [x] Lab 2A: Leader Election 
+  - [x] Lab 2B: Log Replication 
+  - [x] Lab 2C: Persistence
+  - [x] Lab 2D: Log Compaction
 - [ ] [Lab 3: Fault-tolerant Key-Value Service]()
   - [ ] Lab 3A: Key-Value Service
   - [ ] Lab 3B: Snapshot
