@@ -76,10 +76,10 @@ type Raft struct {
 	ballotBox map[int]bool      // Ballot box
 	progress  map[int]*Progress // Follower's log replication progress
 
-	// applyCh cannot be used in lock.
-	applyCh chan ApplyMsg // Used to send command to state machine
+	// applyCh is a channel to deliver ApplyMsg.
+	applyCh chan ApplyMsg // Used to send ApplyMsg to state machine
 	// notifyApplyCh should be set to a relatively large value to avoid blocking.
-	notifyApplyCh chan struct{} // Used to notify leader apply command
+	notifyApplyCh chan struct{} // Used to notify peer deliver command
 
 	logger *zap.SugaredLogger
 }
@@ -335,14 +335,13 @@ func (rf *Raft) applier() {
 // applyCommand sends commands to state machine by applyCh.
 func (rf *Raft) applyCommand() {
 	rf.mu.Lock()
-	l := rf.raftLog
 
+	l := rf.raftLog
 	if l.applied < l.committed {
 		for idx := l.applied + 1; idx <= l.committed; idx++ {
 			entry := l.EntryAt(idx)
 			rf.mu.Unlock()
 
-			// Don't use applyCh in lock.
 			applyMsg := ApplyMsg{
 				CommandValid: true,
 				Command:      entry.Data,
@@ -352,7 +351,6 @@ func (rf *Raft) applyCommand() {
 
 			rf.mu.Lock()
 			l.ApplyTo(idx)
-			rf.persistState()
 			rf.logger.Infof("%s Apply entry: %+v", rf, entry)
 		}
 	}
@@ -405,10 +403,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyCh = applyCh
 	rf.notifyApplyCh = make(chan struct{}, 300)
 	rf.logger = log.NewZapLogger("Raft").Sugar()
-
 	rf.logger.Infof("Start peer [%d] in raft cluster: %v", me, peers)
-	rf.readPersist(persister.ReadRaftState())
 
+	rf.readPersist(persister.ReadRaftState())
 	go rf.ticker()
 	go rf.applier()
 
