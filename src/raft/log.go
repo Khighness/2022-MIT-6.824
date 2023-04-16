@@ -41,7 +41,7 @@ type RaftLog struct {
 	committed int // committed index
 	// applied should not be persisted in stable storage.
 	// Because if there is snapshot in unit test (2D),
-	// the call chain of Raft initialization  is: config.start1() -> config.ingestSnap().
+	// the call chain of Raft initialization is: config.start1() -> config.ingestSnap().
 	// So config will use RaftLog.lastIncludedIndex as applied index instead of RaftLog.applied.
 	applied int // applied index
 
@@ -49,7 +49,7 @@ type RaftLog struct {
 	// lastIncludedTerm is the index of the last entry included in snapshot.
 	lastIncludedTerm int // entries[0].Term
 	// lastIncludedIndex is the term of the last entry included in snapshot.
-	lastIncludedIndex int // entries[0].Index)
+	lastIncludedIndex int // entries[0].Index
 
 	// NOTE: RaftLog should not stores the snapshot data.
 	// Because there is limit for the log size: MAXLOGSIZE.

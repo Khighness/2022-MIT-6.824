@@ -76,6 +76,7 @@ type Raft struct {
 	ballotBox map[int]bool      // Ballot box
 	progress  map[int]*Progress // Follower's log replication progress
 
+	// applyCh cannot be used in lock
 	applyCh       chan ApplyMsg // Used to send command to state machine
 	notifyApplyCh chan struct{} // Used to notify leader apply command
 

@@ -1,6 +1,9 @@
 package raft
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+)
 
 // @Author KHighness
 // @Update 2023-04-08
@@ -13,6 +16,11 @@ type AppendEntriesArgs struct {
 	PrevLogTerm  int     // the term of the previous entry
 	Entries      []Entry // the entries
 	LeaderCommit int     // leader's commit index
+}
+
+func (a AppendEntriesArgs) String() string {
+	return fmt.Sprintf("AEA{Term:%d LeaderId %d PrevLogIndex:%d PrevLogTerm:%d Entries:%+v LeaderCommit:%d}",
+		a.Term, a.LeaderId, a.PrevLogIndex, a.PrevLogTerm, a.Entries, a.LeaderCommit)
 }
 
 // AppendEntriesReply structure.
@@ -32,6 +40,11 @@ type AppendEntriesReply struct {
 	//	If the term of follower's entry is unmatched with the term of leader's previous entry,
 	//	it is the term of follower's conflict entry.
 	LogTerm int
+}
+
+func (r AppendEntriesReply) String() string {
+	return fmt.Sprintf("AER{Term:%d Success:%v LogIndex:%d LogTerm:%d}",
+		r.Term, r.Success, r.LogIndex, r.LogTerm)
 }
 
 // replicateLog does replicating log to other peers.

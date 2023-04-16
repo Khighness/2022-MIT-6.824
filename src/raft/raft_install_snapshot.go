@@ -1,5 +1,7 @@
 package raft
 
+import "fmt"
+
 // @Author KHighness
 // @Update 2023-04-08
 
@@ -12,9 +14,18 @@ type InstallSnapshotArgs struct {
 	Data              []byte // snapshot's data
 }
 
+func (a InstallSnapshotArgs) String() string {
+	return fmt.Sprintf("ISA{Term:%d LeaderId:%d LastIncludedIndex:%d LastIncludedTerm:%d}",
+		a.Term, a.LeaderId, a.LastIncludedIndex, a.LastIncludedTerm)
+}
+
 // InstallSnapshotReply structure.
 type InstallSnapshotReply struct {
 	Term int // reply term
+}
+
+func (a InstallSnapshotReply) String() string {
+	return fmt.Sprintf("ISR{Term:%d}", a.Term)
 }
 
 // A service wants to switch to snapshot.  Only do so if Raft hasn't
@@ -98,8 +109,8 @@ func (rf *Raft) handleInstallSnapshotReply(peer int, args *InstallSnapshotArgs, 
 
 // InstallSnapshot handles InstallSnapshotArgs and replies InstallSnapshotReply.
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
-	rf.logger.Debugf("%s Receive ISA%+v from peer [%d]", rf, args, args.LeaderId)
-	defer rf.logger.Debugf("%s Send ISR%+v to peer [%d]", rf, reply, args.LeaderId)
+	rf.logger.Debugf("%s Receive %s from peer [%d]", rf, args, args.LeaderId)
+	defer rf.logger.Debugf("%s Send %s to peer [%d]", rf, reply, args.LeaderId)
 
 	rf.mu.Lock()
 	reply.Term = rf.term
@@ -134,7 +145,7 @@ func (rf *Raft) doApplyInstallSnapshot(lastSnapshotTerm int, lastSnapshotIndex i
 
 	rf.raftLog = l.Apply(lastSnapshotIndex, lastSnapshotTerm)
 	rf.persistStateAndSnapshot(snapshot)
-	rf.logger.Infof("%s Apply snapshot, old log: %s, new Log: %s", rf, l, rf.raftLog)
+	rf.logger.Infof("%s Apply snapshot, old log: %s, new log: %s", rf, l, rf.raftLog)
 	rf.mu.Unlock()
 
 	applyMsg := ApplyMsg{
