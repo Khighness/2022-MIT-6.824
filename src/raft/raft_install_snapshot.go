@@ -100,7 +100,7 @@ func (rf *Raft) handleInstallSnapshotReply(peer int, args *InstallSnapshotArgs, 
 	}
 
 	if args.Term != rf.term || args.LastIncludedIndex != rf.raftLog.FirstIndex() {
-		rf.logger.Infof("%s Raft state has changed, ignore ISR%+v from peer [%d]", rf, reply, peer)
+		rf.logger.Infof("%s Raft state has changed, ignore %s from peer [%d]", rf, reply, peer)
 		return
 	}
 
