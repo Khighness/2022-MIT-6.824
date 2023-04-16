@@ -31,32 +31,44 @@ func NewEntry(term, index int, data interface{}) Entry {
 // RaftLog structure.
 // It must be persisted in Raft.
 type RaftLog struct {
+	// entries is a persistent state.
+	// entries[0] is a dummy entry which stores the meta data of last snapshot.
+	// entries[1:] are the entries that has not been compacted into the snapshot.
 	entries []Entry // current log entries
 
+	// NOTE: committed index and applied index are volatile state.
+	// committed must be persisted in stable storage.
 	committed int // committed index
-	applied   int // applied index
+	// applied should not be persisted in stable storage.
+	// Because if there is snapshot in unit test (2D),
+	// the call chain of Raft initialization is: config.start1() -> config.ingestSnap().
+	// So config will use RaftLog.lastIncludedIndex as applied index instead of RaftLog.applied.
+	applied int // applied index
 
-	lastSnapshotTerm  int    // the term of the last entry in snapshot
-	lastSnapshotIndex int    // the index of the last entry in snapshot
-	snapshot          []byte // snapshot data
+	// Redundant storage: meta data of last snapshot.
+	// lastIncludedTerm is the index of the last entry included in snapshot.
+	lastIncludedTerm int // entries[0].Term
+	// lastIncludedIndex is the term of the last entry included in snapshot.
+	lastIncludedIndex int // entries[0].Index
+
+	// NOTE: RaftLog should not stores the snapshot data.
+	// Because there is limit for the log size: MAXLOGSIZE.
 
 	logger *zap.SugaredLogger
 }
 
 // NewRaftLog creates a RaftLog instance.
-func NewRaftLog(entries []Entry, committed, applied int,
-	lastSnapshotTerm, lastSnapshotIndex int, snapshot []byte) *RaftLog {
+func NewRaftLog(entries []Entry, committed, applied int, lastSnapshotTerm, lastSnapshotIndex int) *RaftLog {
 	raftLog := &RaftLog{
 		entries:           entries,
 		committed:         committed,
 		applied:           applied,
-		lastSnapshotTerm:  lastSnapshotTerm,
-		lastSnapshotIndex: lastSnapshotIndex,
-		snapshot:          snapshot,
+		lastIncludedTerm:  lastSnapshotTerm,
+		lastIncludedIndex: lastSnapshotIndex,
 		logger:            log.NewZapLogger("RaftLog").Sugar(),
 	}
 
-	if len(entries) == 0 { // dummy entry which stores the meta data of last snapshot
+	if len(entries) == 0 { // Create a dummy entry.
 		raftLog.entries = []Entry{{
 			Term:  lastSnapshotTerm,
 			Index: lastSnapshotIndex,
@@ -67,29 +79,22 @@ func NewRaftLog(entries []Entry, committed, applied int,
 }
 
 //  NewRaftLog creates a RaftLog instance by labgob.LabDecoder.
-func NewRaftLogFromDecoder(statDecoder *labgob.LabDecoder, snapDecoder *labgob.LabDecoder) *RaftLog {
+func NewRaftLogFromDecoder(statDecoder *labgob.LabDecoder) *RaftLog {
 	var (
 		entries           []Entry
 		committed         int
-		applied           int
-		lastSnapshotIndex int
-		lastSnapshotTerm  int
-		snapshot          []byte
+		lastIncludedIndex int
+		lastIncludedTerm  int
 	)
 
 	if statDecoder.Decode(&entries) != nil ||
 		statDecoder.Decode(&committed) != nil ||
-		statDecoder.Decode(&applied) != nil ||
-		statDecoder.Decode(&lastSnapshotIndex) != nil ||
-		statDecoder.Decode(&lastSnapshotTerm) != nil {
+		statDecoder.Decode(&lastIncludedIndex) != nil ||
+		statDecoder.Decode(&lastIncludedTerm) != nil {
 		panic("failed to decode raft log's state")
 	}
 
-	if snapDecoder != nil && snapDecoder.Decode(&snapshot) != nil {
-		panic("failed to decode raft log's snapshot")
-	}
-
-	return NewRaftLog(entries, committed, applied, lastSnapshotTerm, lastSnapshotIndex, snapshot)
+	return NewRaftLog(entries, committed, lastIncludedIndex, lastIncludedTerm, lastIncludedIndex)
 }
 
 // String returns RaftLog's string.
@@ -128,6 +133,11 @@ func (l *RaftLog) AppendEntry(entry Entry) {
 // AppendEntry appends the entries to tail.
 func (l *RaftLog) AppendEntries(entries []Entry) {
 	l.entries = append(l.entries, entries...)
+}
+
+// Get returns the entry corresponding to the slice index.
+func (l *RaftLog) Get(sliceIndex int) Entry {
+	return l.entries[sliceIndex]
 }
 
 // EntryAt returns the entry corresponding to the index of entry.
@@ -186,57 +196,57 @@ func (l *RaftLog) ToSliceIndex(logIndex int) int {
 	return logIndex - l.entries[0].Index
 }
 
-// Compact compacts the entries.
-func (l *RaftLog) Compact(index int, snapshot []byte) {
-	if index < l.FirstIndex() || index > l.LastIndex() {
-		l.logger.Warnf("Compact: index(%d) is not in [%d, %d]", index, l.FirstIndex(), l.LastIndex())
+// CompactTo compacts the entries.
+// Just removes the entries whose index is less than the given index.
+func (l *RaftLog) CompactTo(index int) {
+	if index <= l.FirstIndex() || index > l.LastIndex() {
+		l.logger.Warnf("CompactTo: index(%d) is out bound of (%d, %d]", index, l.FirstIndex(), l.LastIndex())
+		return
 	}
 
-	l.entries = l.entries[index-l.lastSnapshotIndex:]
-	l.lastSnapshotIndex = index
-	l.lastSnapshotTerm = l.EntryAt(index).Term
-	l.snapshot = snapshot
+	l.lastIncludedTerm = l.EntryAt(index).Term
+	l.committed = max(l.committed, index)
+	l.applied = max(l.applied, index)
+	l.entries = l.entries[index-l.lastIncludedIndex+1:]
+	l.lastIncludedIndex = index
+
+	newEntries := make([]Entry, 1)
+	newEntries[0] = Entry{Term: l.lastIncludedTerm, Index: l.lastIncludedIndex}
+	l.entries = append(newEntries, l.entries...)
 }
 
-// ApplySnapshot applies the snapshot.
-func (l *RaftLog) Apply(index int, term int, snapshot []byte) {
-	if index < l.FirstIndex() {
-		l.logger.Warnf("Apply: index(%d) < lastSnapshotIndex(%d)", index, l.FirstIndex())
+// ApplySnapshot applies the snapshot and maybe return a new instance.
+func (l *RaftLog) Apply(index int, term int) *RaftLog {
+	if index <= l.FirstIndex() {
+		l.logger.Warnf("Apply: index(%d) <= lastIncludedIndex(%d)", index, l.FirstIndex())
+		return l
 	}
 
 	if index > l.LastIndex() {
-		l = NewRaftLog(nil, index, index, term, index, snapshot)
+		l = NewRaftLog(nil, index, index, term, index)
 	} else {
-		l.Compact(index, snapshot)
+		l.CompactTo(index)
 	}
+
+	return l
 }
 
-// EncodeState encodes RaftLog's state by labgob.LabEncoder.
-func (l *RaftLog) EncodeState(encoder *labgob.LabEncoder) error {
-	if err := encoder.Encode(l.entries); err != nil {
+// Encode encodes RaftLog's state by labgob.LabEncoder.
+func (l *RaftLog) Encode(encoder *labgob.LabEncoder) error {
+	var err error
+	if err = encoder.Encode(l.entries); err != nil {
 		return err
 	}
-	if err := encoder.Encode(l.committed); err != nil {
+	if err = encoder.Encode(l.committed); err != nil {
 		return err
 	}
-	if err := encoder.Encode(l.applied); err != nil {
+	if err = encoder.Encode(l.lastIncludedIndex); err != nil {
 		return err
 	}
-	if err := encoder.Encode(l.lastSnapshotIndex); err != nil {
-		return err
-	}
-	if err := encoder.Encode(l.lastSnapshotTerm); err != nil {
-		return err
-	}
-	if err := encoder.Encode(l.snapshot); err != nil {
+	if err = encoder.Encode(l.lastIncludedTerm); err != nil {
 		return err
 	}
 	return nil
-}
-
-// EncodeSnapshot encodes RaftLog's snapshot by labgob.LabEncoder.
-func (l *RaftLog) EncodeSnapshot(encoder *labgob.LabEncoder) error {
-	return encoder.Encode(l.snapshot)
 }
 
 // validateIndex validates the slice index.

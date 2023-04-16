@@ -203,6 +203,7 @@ func (cfg *config) ingestSnap(i int, snapshot []byte, index int) string {
 		cfg.logs[i][j] = xlog[j]
 	}
 	cfg.lastApplied[i] = lastIncludedIndex
+	DPrintf("s[%d] apply to: %d (snapshot)", i, lastIncludedIndex)
 	return ""
 }
 
@@ -242,6 +243,7 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 
 			cfg.mu.Lock()
 			cfg.lastApplied[i] = m.CommandIndex
+			DPrintf("s[%d] apply to: %d (command)", i, m.CommandIndex)
 			cfg.mu.Unlock()
 
 			if (m.CommandIndex+1)%SnapShotInterval == 0 {
@@ -305,7 +307,7 @@ func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
 		snapshot := cfg.saved[i].ReadSnapshot()
 		if snapshot != nil && len(snapshot) > 0 {
 			// mimic KV server and process snapshot now.
-			// ideally Raft should send it up on applyCh...
+			// ideally Raft should send it up on applyCh...]
 			err := cfg.ingestSnap(i, snapshot, -1)
 			if err != "" {
 				cfg.t.Fatal(err)
@@ -358,7 +360,7 @@ func (cfg *config) cleanup() {
 
 // attach server i to the net.
 func (cfg *config) connect(i int) {
-	// fmt.Printf("connect(%d)\n", i)
+	DPrintf("connect(%d)\n", i)
 
 	cfg.connected[i] = true
 
@@ -381,7 +383,7 @@ func (cfg *config) connect(i int) {
 
 // detach server i from the net.
 func (cfg *config) disconnect(i int) {
-	// fmt.Printf("disconnect(%d)\n", i)
+	DPrintf("disconnect(%d)\n", i)
 
 	cfg.connected[i] = false
 

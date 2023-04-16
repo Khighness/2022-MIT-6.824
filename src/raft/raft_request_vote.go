@@ -1,5 +1,7 @@
 package raft
 
+import "fmt"
+
 // @Author KHighness
 // @Update 2023-04-08
 
@@ -11,10 +13,19 @@ type RequestVoteArgs struct {
 	LastLogTerm  int // the term of the last entry
 }
 
+func (a RequestVoteArgs) String() string {
+	return fmt.Sprintf("RVA{Term:%d CandidateId:%d LastLogIndex:%d LastLogTerm:%d}",
+		a.Term, a.CandidateId, a.LastLogIndex, a.LastLogTerm)
+}
+
 // RequestVoteReply structure.
 type RequestVoteReply struct {
 	Term  int  // reply term
 	Voted bool // if vote to candidate
+}
+
+func (r RequestVoteReply) String() string {
+	return fmt.Sprintf("RVR{Term:%d Voted:%v}", r.Term, r.Voted)
 }
 
 // startElection starts a new round of election.
@@ -117,8 +128,8 @@ func (rf *Raft) grantVotes() int {
 
 // RequestVote handles RequestVoteArgs and replies RequestVoteReply.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	rf.logger.Debugf("%s Receive RVA%+v from peer [%d]", rf, args, args.CandidateId)
-	defer rf.logger.Debugf("%s Send RVR%+v to peer [%d]", rf, reply, args.CandidateId)
+	rf.logger.Debugf("%s Receive %s from peer [%d]", rf, args, args.CandidateId)
+	defer rf.logger.Debugf("%s Send %s to peer [%d]", rf, reply, args.CandidateId)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -137,7 +148,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// 2. For all roles: if Term > rf.term, convert to follower.
 	if args.Term > rf.term {
 		rf.logger.Infof("%s RVA term(%d) > current term(%d), become follower at term: %d",
-			rf, args.Term, rf.term, reply.Term)
+			rf, args.Term, rf.term, args.Term)
 		rf.becomeFollower(args.Term, None)
 		reply.Term = rf.term
 	}

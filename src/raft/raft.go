@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"6.824/log"
 	"bytes"
 	"fmt"
 	"sync"
@@ -10,7 +9,7 @@ import (
 
 	"6.824/labgob"
 	"6.824/labrpc"
-	_ "6.824/log"
+	"6.824/log"
 
 	"go.uber.org/zap"
 )
@@ -72,11 +71,12 @@ type Raft struct {
 	term    int      // Current term
 	vote    int      // Voted for
 	lead    int      // Leader id
-	raftLog *RaftLog // Raft Log
+	raftLog *RaftLog // Raft log
 
 	ballotBox map[int]bool      // Ballot box
 	progress  map[int]*Progress // Follower's log replication progress
 
+	// applyCh cannot be used in lock
 	applyCh       chan ApplyMsg // Used to send command to state machine
 	notifyApplyCh chan struct{} // Used to notify leader apply command
 
@@ -125,27 +125,22 @@ func (rf *Raft) persistState() {
 	if err = encoder.Encode(rf.vote); err != nil {
 		rf.logger.Panic(err)
 	}
-	if err = rf.raftLog.EncodeState(encoder); err != nil {
+	if err = rf.raftLog.Encode(encoder); err != nil {
 		rf.logger.Panic(err)
 	}
 
 	rf.persister.SaveRaftState(buffer.Bytes())
+	rf.logger.Infof("%s Persist state, term = %d, vote = %d, log = %s", rf, rf.term, rf.vote, rf.raftLog)
 }
 
 // persistStateAndSnapshot saves Raft's state and snapshot to stable storage.
-func (rf *Raft) persistStateAndSnapshot() {
+func (rf *Raft) persistStateAndSnapshot(snapshot []byte) {
 	rf.persistState()
-
-	buffer := new(bytes.Buffer)
-	encoder := labgob.NewEncoder(buffer)
-	if err := rf.raftLog.EncodeSnapshot(encoder); err != nil {
-		rf.logger.Panic(err)
-	}
-	rf.persister.SaveSnapshot(buffer.Bytes())
+	rf.persister.SaveSnapshot(snapshot)
 }
 
 // readPersist restores previously persisted state and snapshot.
-func (rf *Raft) readPersist(state []byte, snapshot []byte) {
+func (rf *Raft) readPersist(state []byte) {
 	if state == nil || len(state) < 1 {
 		return
 	}
@@ -165,12 +160,10 @@ func (rf *Raft) readPersist(state []byte, snapshot []byte) {
 	rf.vote = vote
 
 	// Recover log.
-	var snapDecoder *labgob.LabDecoder
-	if len(snapshot) > 0 {
-		snapBuffer := bytes.NewBuffer(snapshot)
-		snapDecoder = labgob.NewDecoder(snapBuffer)
-	}
-	rf.raftLog = NewRaftLogFromDecoder(statDecoder, snapDecoder)
+	rf.raftLog = NewRaftLogFromDecoder(statDecoder)
+
+	// Peer maybe need to apply entries.
+	rf.notifyApplyCh <- applySignal
 
 	rf.logger.Infof("%s Recover state, term = %d, vote = %d, log = %s", rf, rf.term, rf.vote, rf.raftLog)
 }
@@ -338,26 +331,29 @@ func (rf *Raft) applier() {
 // applyCommand sends commands to state machine by applyCh.
 func (rf *Raft) applyCommand() {
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
 	l := rf.raftLog
-	if l.applied < l.FirstIndex() {
-		go rf.CondInstallSnapshot(l.lastSnapshotTerm, l.lastSnapshotIndex, rf.persister.snapshot)
-	} else if l.applied < l.committed {
+
+	if l.applied < l.committed {
 		for idx := l.applied + 1; idx <= l.committed; idx++ {
 			entry := l.EntryAt(idx)
+			rf.mu.Unlock()
+
+			// Don't use applyCh in lock.
 			applyMsg := ApplyMsg{
 				CommandValid: true,
 				Command:      entry.Data,
 				CommandIndex: entry.Index,
 			}
-
 			rf.applyCh <- applyMsg
+
+			rf.mu.Lock()
 			l.ApplyTo(idx)
+			rf.persistState()
 			rf.logger.Infof("%s Apply entry: %+v", rf, entry)
 		}
-		rf.persistState()
 	}
+
+	rf.mu.Unlock()
 }
 
 // leaderAppendEntry appends an entry to leader's log.
@@ -396,7 +392,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.vote = Zero
 	rf.lead = None
 	rf.tick = newTicker()
-	rf.raftLog = NewRaftLog(nil, Zero, Zero, Zero, Zero, nil)
+	rf.raftLog = NewRaftLog(nil, Zero, Zero, Zero, Zero)
 	rf.progress = make(map[int]*Progress)
 	for peer := range peers {
 		rf.progress[peer] = &Progress{}
@@ -407,7 +403,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.logger = log.NewZapLogger("Raft").Sugar()
 
 	rf.logger.Infof("Start peer [%d] in raft cluster: %v", me, peers)
-	rf.readPersist(persister.ReadRaftState(), persister.ReadSnapshot())
+	rf.readPersist(persister.ReadRaftState())
 
 	go rf.ticker()
 	go rf.applier()

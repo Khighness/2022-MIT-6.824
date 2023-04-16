@@ -1,6 +1,9 @@
 package raft
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+)
 
 // @Author KHighness
 // @Update 2023-04-08
@@ -13,6 +16,11 @@ type AppendEntriesArgs struct {
 	PrevLogTerm  int     // the term of the previous entry
 	Entries      []Entry // the entries
 	LeaderCommit int     // leader's commit index
+}
+
+func (a AppendEntriesArgs) String() string {
+	return fmt.Sprintf("AEA{Term:%d LeaderId %d PrevLogIndex:%d PrevLogTerm:%d Entries:%+v LeaderCommit:%d}",
+		a.Term, a.LeaderId, a.PrevLogIndex, a.PrevLogTerm, a.Entries, a.LeaderCommit)
 }
 
 // AppendEntriesReply structure.
@@ -32,6 +40,11 @@ type AppendEntriesReply struct {
 	//	If the term of follower's entry is unmatched with the term of leader's previous entry,
 	//	it is the term of follower's conflict entry.
 	LogTerm int
+}
+
+func (r AppendEntriesReply) String() string {
+	return fmt.Sprintf("AER{Term:%d Success:%v LogIndex:%d LogTerm:%d}",
+		r.Term, r.Success, r.LogIndex, r.LogTerm)
 }
 
 // replicateLog does replicating log to other peers.
@@ -78,6 +91,12 @@ func (rf *Raft) sendAppendEntriesToPeer(peer int) {
 	rf.mu.Lock()
 	if !rf.isLeader() {
 		rf.mu.Unlock()
+		return
+	}
+
+	if rf.shouldSendInstallSnapshot(peer) {
+		rf.mu.Unlock()
+		go rf.sendInstallSnapshotToPeer(peer)
 		return
 	}
 
@@ -136,7 +155,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 		if logTerm != Zero {
 			// Rollback to the index of the first entry on its term.
 			sliceIndex := sort.Search(l.Length(), func(i int) bool {
-				return l.EntryAt(i).Term > logTerm
+				return l.Get(i).Term > logTerm
 			})
 			entryIndex := l.ToEntryIndex(sliceIndex)
 			rf.logger.Infof("%s Handle conflict log term for peer [%d]: %d, rollback next index to: %d",
@@ -148,7 +167,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 		}
 
 		rf.progress[peer].Next = max(logIndex, l.FirstIndex()+1)
-		go rf.replicateLogToPeer(peer, false)
+		go rf.sendAppendEntriesToPeer(peer)
 		return
 	}
 
@@ -174,8 +193,8 @@ func (rf *Raft) tryAdvanceCommitted() {
 		i++
 	}
 	sort.Sort(match)
-
 	committedQuorum := match[(total-1)/2]
+
 	l := rf.raftLog
 	if committedQuorum > l.committed && l.EntryAt(committedQuorum).Term == rf.term {
 		rf.raftLog.CommitTo(committedQuorum)
@@ -227,7 +246,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				rf, rf.id, args.PrevLogIndex, prevEntry.Term, args.PrevLogIndex, args.PrevLogTerm)
 			reply.LogTerm = prevEntry.Term
 			reply.LogIndex = sort.Search(l.ToSliceIndex(args.PrevLogIndex+1), func(i int) bool {
-				return l.EntryAt(i).Term == prevEntry.Term
+				return l.Get(i).Term == prevEntry.Term
 			})
 			return
 		}
@@ -267,6 +286,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		l.CommitTo(committed)
 		rf.logger.Infof("%s Advance committed index to: %d", rf, committed)
 		rf.notifyApplyCh <- applySignal
+	}
+
+	// (8) Handle corner case: multiple leaders in the cluster.
+	if rf.isLeader() && args.LeaderCommit >= l.committed {
+		rf.becomeFollower(args.Term, args.LeaderId)
 	}
 
 	reply.Success = true
