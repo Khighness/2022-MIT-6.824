@@ -208,8 +208,8 @@ func (rf *Raft) tryAdvanceCommitted() {
 
 // AppendEntries handles AppendEntriesArgs and replies AppendEntriesReply.
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	rf.logger.Debugf("%s Receive AEA%+v from peer [%d]", rf, args, args.LeaderId)
-	defer rf.logger.Debugf("%s Send AER%+v to peer [%d]", rf, reply, args.LeaderId)
+	rf.logger.Debugf("%s Receive %s from peer [%d]", rf, args, args.LeaderId)
+	defer rf.logger.Debugf("%s Send %s to peer [%d]", rf, reply, args.LeaderId)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
