@@ -37,6 +37,9 @@ const Zero int = 0
 // None is a placeholder node ID used when there is no leader.
 const None int = -1
 
+// enableLockLog controls whether to print the lock hook log.
+const enableLockLog = false
+
 // Progress structure.
 // It represents a follower's progress in the view of the leader.
 type Progress struct {
@@ -89,6 +92,24 @@ type Raft struct {
 //	[role name - peer id : current term]
 func (rf *Raft) String() string {
 	return fmt.Sprintf("[%s-%v:%d]", rf.role.ShortString(), rf.id, rf.term)
+}
+
+// lock tries to acquire lock with action log.
+func (rf *Raft) lock() {
+	if enableLockLog {
+		action := getCalledFunction()
+		rf.logger.Infof("%s Try to lock for: %s", rf, action)
+		defer rf.logger.Infof("%s Succeed to lock for: %s", rf, action)
+	}
+	rf.mu.Lock()
+}
+
+// lock tries to release lock with action log.
+func (rf *Raft) unlock() {
+	rf.mu.Unlock()
+	if enableLockLog {
+		rf.logger.Infof("%s Succeed to unlock after: %s", rf, getCalledFunction())
+	}
 }
 
 // GetState returns the peer's current state and if current peer is leader.
@@ -233,19 +254,6 @@ func (rf *Raft) alive() bool {
 // isStandalone checks if the peer is standalone.
 func (rf *Raft) isStandalone() bool {
 	return len(rf.peers) == 1
-}
-
-// lock tries to acquire lock with action log.
-func (rf *Raft) lock(action string) {
-	rf.logger.Debugf("%s Try to lock for: %s", rf, action)
-	rf.mu.Lock()
-	rf.logger.Debugf("%s Succeed to lock for: %s", rf, action)
-}
-
-// lock tries to release lock with action log.
-func (rf *Raft) unlock(action string) {
-	rf.mu.Unlock()
-	rf.logger.Debugf("%s Succeed to unlock after: %s", rf, action)
 }
 
 // becomeFollower transforms this peer's role to Follower.

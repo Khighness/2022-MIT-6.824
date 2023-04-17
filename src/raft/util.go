@@ -3,6 +3,8 @@ package raft
 import (
 	"log"
 	"math/rand"
+	"runtime"
+	"strings"
 	"time"
 )
 
@@ -33,6 +35,12 @@ func max(a, b int) int {
 func randTimeDuration(lower, upper time.Duration) time.Duration {
 	randTime := rand.Int63n(upper.Nanoseconds()-lower.Nanoseconds()) + lower.Nanoseconds()
 	return time.Duration(randTime) * time.Nanosecond
+}
+
+func getCalledFunction() string {
+	caller, _, _, _ := runtime.Caller(2)
+	action := runtime.FuncForPC(caller).Name()
+	return action[strings.LastIndex(action, ".")+1:]
 }
 
 type intSlice []int
