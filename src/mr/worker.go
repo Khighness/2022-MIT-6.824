@@ -1,83 +1,78 @@
 package mr
 
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
+import (
+	"fmt"
+	"hash/fnv"
+	"net/rpc"
+)
 
-
-//
-// Map functions return a slice of KeyValue.
-//
+// StateMap functions return a slice of KeyValue.
 type KeyValue struct {
 	Key   string
 	Value string
 }
 
-//
+type ByKey []KeyValue
+
+func (k ByKey) Len() int           { return len(k) }
+func (k ByKey) Less(i, j int) bool { return k[i].Key < k[j].Key }
+func (k ByKey) Swap(i, j int)      { k[i], k[j] = k[j], k[i] }
+
 // use ihash(key) % NReduce to choose the reduce
-// task number for each KeyValue emitted by Map.
-//
+// task number for each KeyValue emitted by StateMap.
 func ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+type worker struct {
+	workerId   int
+	mapFunc    func(string, string) []KeyValue
+	reduceFunc func(string, []string) string
+}
 
-//
+// getReduceFileName returns the name of output file in the map phase.
+func (w *worker) getReduceFileName(mapId, partitionId int) string {
+	return fmt.Sprintf("mr-reduce-%d-%d", mapId, partitionId)
+}
+
+// getMergeFileName returns the name of output file in the reduce phase.
+func (w *worker) getMergeFileName(partitionId int) string {
+	return fmt.Sprintf("mr-merge-%d", partitionId)
+}
+
+// register registers the worker to the Coordinator.
+func (w *worker) register() {
+
+}
+
+// applyTask applies for task from the Coordinator.
+func (w *worker) applyTask() (*Task, error) {
+
+	return nil, nil
+}
+
+// reportTask reports task state to the Coordinator.
+func (w *worker) reportTask(task Task, done bool) {
+
+}
+
 // main/mrworker.go calls this function.
-//
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
-
-	// Your worker implementation here.
-
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
+func Worker(mapFunc func(string, string) []KeyValue,
+	reduceFunc func(string, []string) string) {
 
 }
 
-//
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func CallExample() {
-
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
-	}
-}
-
-//
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
-//
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
-		log.Fatal("dialing:", err)
+		panic(fmt.Errorf("dialing: %s", err))
 	}
 	defer c.Close()
 

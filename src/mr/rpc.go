@@ -1,29 +1,39 @@
 package mr
 
-//
-// RPC definitions.
-//
-// remember to capitalize all names.
-//
+import (
+	"os"
+	"strconv"
+)
 
-import "os"
-import "strconv"
-
-//
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
-
-type ExampleArgs struct {
-	X int
+// RegisterArgs structure.
+type RegisterArgs struct {
 }
 
-type ExampleReply struct {
-	Y int
+// RegisterReply structure.
+type RegisterReply struct {
+	WorkerId int
 }
 
-// Add your RPC definitions here.
+// ApplyTaskArgs structure.
+type ApplyTaskArgs struct {
+	WorkerId int
+}
 
+// ApplyTaskReply structure.
+type ApplyTaskReply struct {
+	Task *Task
+}
+
+// ReportTaskArgs structure.
+type ReportTaskArgs struct {
+	WorkerId int
+	Phase    TaskPhase
+	Done     bool
+}
+
+// ReportTaskReply structure.
+type ReportTaskReply struct {
+}
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
