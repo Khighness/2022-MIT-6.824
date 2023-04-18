@@ -24,10 +24,11 @@ const (
 
 // Task structure.
 type Task struct {
-	filename  string
-	content   string
-	status    TaskStatus
-	createdAt time.Time
+	Filename string
+	Phase    TaskPhase
+	NMap     int
+	NReduce  int
+	Seq      int
 }
 
 // TaskState structure.
