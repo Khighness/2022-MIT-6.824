@@ -1,18 +1,24 @@
 package mr
 
 import (
+	"6.824/log"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"go.uber.org/zap"
 	"hash/fnv"
+	"io/ioutil"
 	"net/rpc"
+	"os"
 )
 
-// StateMap functions return a slice of KeyValue.
+// KeyValue represents Key-Value.
 type KeyValue struct {
 	Key   string
 	Value string
 }
 
+// ByKey uses to sort KeyValue slice by key.
 type ByKey []KeyValue
 
 func (k ByKey) Len() int           { return len(k) }
@@ -45,32 +51,125 @@ func (w *worker) getMergeFileName(partitionId int) string {
 	return fmt.Sprintf("mr-merge-%d", partitionId)
 }
 
+// start starts worker.
+func (w *worker) start() {
+	if err := w.register(); err != nil {
+		w.logger.Fatal(err)
+	}
+	for {
+		task, err := w.applyTask()
+		if err != nil {
+			w.logger.Error(err)
+		}
+		if task != nil {
+			w.execTask(*task)
+		}
+	}
+}
+
 // register registers the worker to the Coordinator.
-func (w *worker) register() {
+func (w *worker) register() error {
 	args := &RegisterArgs{}
 	reply := &RegisterReply{}
 	if ok := call("Coordinator.RegisterWorker", args, reply); !ok {
-		w.logger.Errorf("Failed to call RegisterWorker")
-		return
+		return errors.New("failed to call: RegisterWorker")
 	}
 	w.workerId = reply.WorkerId
+	w.logger.Infof("Register workerId: %d", w.workerId)
+	return nil
 }
 
 // applyTask applies for task from the Coordinator.
 func (w *worker) applyTask() (*Task, error) {
+	args := &ApplyTaskArgs{WorkerId: w.workerId}
+	reply := &ApplyTaskReply{}
+	if ok := call("Coordinator.ApplyTask", args, reply); !ok {
+		return nil, errors.New("failed to call: ApplyTask")
+	}
+	w.logger.Infof("Apply for task: %+v", reply.Task)
+	return reply.Task, nil
+}
 
-	return nil, nil
+// execTask executes a task.
+func (w *worker) execTask(task Task) {
+	switch task.Phase {
+	case TaskPhaseMap:
+		w.execMapTask(task)
+	case TaskPhaseReduce:
+		w.execReduceTask(task)
+	}
+}
+
+// execMapTask executes a map task.
+func (w *worker) execMapTask(task Task) {
+	bytes, err := ioutil.ReadFile(task.Filename)
+	if err != nil {
+		w.logger.Error("Failed to read file: %s, err: %s", task.Filename, err)
+		w.reportTask(task, false)
+		return
+	}
+
+	kvs := w.mapFunc(task.Filename, string(bytes))
+	partitions := make([]ByKey, task.NReduce)
+	for _, kv := range kvs {
+		pid := ihash(kv.Key) % task.NReduce
+		partitions[pid] = append(partitions[pid], kv)
+	}
+
+	for pid, kvs := range partitions {
+		fileName := w.getReduceFileName(task.Seq, pid)
+		file, err := os.Create(fileName)
+		if err != nil {
+			w.logger.Error("Failed to created file: %s, err: %s", fileName, err)
+			w.reportTask(task, false)
+			return
+		}
+
+		encoder := json.NewEncoder(file)
+		for _, kv := range kvs {
+			if err := encoder.Encode(&kv); err != nil {
+				w.logger.Error("Failed to encode kv: %v, err: %s", kv, err)
+				w.reportTask(task, false)
+				return
+			}
+		}
+
+		_ = file.Close()
+	}
+
+	w.reportTask(task, true)
+}
+
+// execReduceTask executes a reduce task.
+func (w *worker) execReduceTask(task Task) {
+
 }
 
 // reportTask reports task state to the Coordinator.
 func (w *worker) reportTask(task Task, done bool) {
-
+	args := &ReportTaskArgs{
+		Seq:      task.Seq,
+		WorkerId: w.workerId,
+		Phase:    task.Phase,
+		Done:     done,
+	}
+	reply := &RegisterReply{}
+	if ok := call("Coordinator.ReportTask", args, reply); !ok {
+		w.logger.Error("failed to call: ReportTask")
+	}
 }
 
 // main/mrworker.go calls this function.
 func Worker(mapFunc func(string, string) []KeyValue,
 	reduceFunc func(string, []string) string) {
 
+	worker := worker{
+		mapFunc:    mapFunc,
+		reduceFunc: reduceFunc,
+		logger:     log.NewZapLogger("Worker").Sugar(),
+	}
+
+	worker.start()
 }
 
 // send an RPC request to the coordinator, wait for the response.
