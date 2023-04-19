@@ -26,6 +26,7 @@ type ApplyTaskReply struct {
 
 // ReportTaskArgs structure.
 type ReportTaskArgs struct {
+	Seq      int
 	WorkerId int
 	Phase    TaskPhase
 	Done     bool

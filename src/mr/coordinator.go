@@ -1,7 +1,9 @@
 package mr
 
 import (
+	"6.824/log"
 	"fmt"
+	"go.uber.org/zap"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -17,6 +19,8 @@ const (
 
 // Coordinator structure.
 type Coordinator struct {
+	mu         sync.Mutex
+	ticker     *time.Ticker
 	files      []string
 	nMap       int
 	nReduce    int
@@ -25,7 +29,7 @@ type Coordinator struct {
 	taskQueue  chan Task
 	workerSeq  int
 	done       bool
-	mu         sync.Mutex
+	logger     *zap.SugaredLogger
 }
 
 // start a thread that listens for RPCs from worker.go
@@ -53,17 +57,45 @@ func (c *Coordinator) Done() bool {
 
 // RegisterWorker processes rpc logic of worker registry.
 func (c *Coordinator) RegisterWorker(args *RegisterArgs, reply *RegisterReply) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
+	c.workerSeq++
+	reply.WorkerId = c.workerSeq
+	c.logger.Infof("Worker [%d] registered", reply.WorkerId)
 }
 
 // ApplyTask processes rpc logic that worker applies for task.
 func (c *Coordinator) ApplyTask(args *ApplyTaskArgs, reply *ApplyTaskReply) {
-
+	task := c.popTask(args.WorkerId)
+	reply.Task = &task
+	c.logger.Infof("Worker [%d] get task: %+v", task)
 }
 
-// ApplyTask processes rpc logic that worker report task status.
+// ApplyTask processes rpc logic that worker reports task status.
 func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
+	c.logger.Infof("Worker [%d] report task: %+v", args)
+	taskState := c.taskStates[args.Seq]
+	if c.taskPhase != args.Phase || taskState.workerId != args.WorkerId {
+		return
+	}
+
+	if args.Done {
+		taskState.status = TaskStatusFinished
+	}
+}
+
+// scheduleTaskPeriodically schedules task per
+func (c *Coordinator) scheduleTaskPeriodically() {
+	for !c.Done() {
+		select {
+		case <-c.ticker.C:
+			c.pollingTask()
+		}
+	}
 }
 
 // pollingTask polls all task states.
@@ -91,10 +123,12 @@ func (c *Coordinator) pollingTask() {
 
 	if done {
 		if c.taskPhase == TaskPhaseMap {
-			c.taskPhase = TaskPhaseMap
+			c.taskPhase = TaskPhaseReduce
 			c.taskStates = make([]TaskState, c.nReduce)
+			c.logger.Infof("Phase: reduce")
 		} else {
 			c.done = true
+			c.logger.Infof("Task completed")
 		}
 	}
 }
@@ -135,13 +169,14 @@ func (c *Coordinator) popTask(workerId int) Task {
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{
+		ticker:     time.NewTicker(scheduleInterval),
 		files:      files,
 		nMap:       len(files),
 		nReduce:    nReduce,
 		taskPhase:  TaskPhaseMap,
 		taskStates: make([]TaskState, len(files)),
-		workerSeq:  0,
 		done:       false,
+		logger:     log.NewZapLogger("Master").Sugar(),
 	}
 
 	if c.nMap > c.nReduce {
@@ -150,6 +185,10 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		c.taskQueue = make(chan Task, c.nReduce)
 	}
 
+	c.logger.Infof("Initialize, nMap: %d, nReduce: %d", c.nMap, c.nReduce)
+	c.logger.Infof("Phase: map")
+
+	go c.scheduleTaskPeriodically()
 	c.server()
 	return &c
 }

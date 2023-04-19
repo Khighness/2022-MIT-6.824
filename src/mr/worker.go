@@ -2,6 +2,7 @@ package mr
 
 import (
 	"fmt"
+	"go.uber.org/zap"
 	"hash/fnv"
 	"net/rpc"
 )
@@ -26,10 +27,12 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+// worker structure.
 type worker struct {
 	workerId   int
 	mapFunc    func(string, string) []KeyValue
 	reduceFunc func(string, []string) string
+	logger     *zap.SugaredLogger
 }
 
 // getReduceFileName returns the name of output file in the map phase.
@@ -44,7 +47,13 @@ func (w *worker) getMergeFileName(partitionId int) string {
 
 // register registers the worker to the Coordinator.
 func (w *worker) register() {
-
+	args := &RegisterArgs{}
+	reply := &RegisterReply{}
+	if ok := call("Coordinator.RegisterWorker", args, reply); !ok {
+		w.logger.Errorf("Failed to call RegisterWorker")
+		return
+	}
+	w.workerId = reply.WorkerId
 }
 
 // applyTask applies for task from the Coordinator.
