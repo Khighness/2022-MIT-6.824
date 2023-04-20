@@ -1,17 +1,19 @@
 package mr
 
 import (
-	"6.824/log"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go.uber.org/zap"
 	"hash/fnv"
 	"io/ioutil"
 	"net/rpc"
 	"os"
 	"sort"
 	"strings"
+
+	"6.824/log"
+
+	"go.uber.org/zap"
 )
 
 // KeyValue represents Key-Value.

@@ -1,15 +1,17 @@
 package mr
 
 import (
-	"6.824/log"
 	"fmt"
-	"go.uber.org/zap"
 	"net"
 	"net/http"
 	"net/rpc"
 	"os"
 	"sync"
 	"time"
+
+	"6.824/log"
+
+	"go.uber.org/zap"
 )
 
 const (
