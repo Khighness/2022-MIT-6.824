@@ -10,6 +10,8 @@ import (
 	"io/ioutil"
 	"net/rpc"
 	"os"
+	"sort"
+	"strings"
 )
 
 // KeyValue represents Key-Value.
@@ -67,7 +69,7 @@ func (w *worker) start() {
 	}
 }
 
-// register registers the worker to the Coordinator.
+// register registers the worker to the coordinator.
 func (w *worker) register() error {
 	args := &RegisterArgs{}
 	reply := &RegisterReply{}
@@ -79,7 +81,7 @@ func (w *worker) register() error {
 	return nil
 }
 
-// applyTask applies for task from the Coordinator.
+// applyTask applies for task from the coordinator.
 func (w *worker) applyTask() (*Task, error) {
 	args := &ApplyTaskArgs{WorkerId: w.workerId}
 	reply := &ApplyTaskReply{}
@@ -142,10 +144,58 @@ func (w *worker) execMapTask(task Task) {
 
 // execReduceTask executes a reduce task.
 func (w *worker) execReduceTask(task Task) {
+	kvs := make([]KeyValue, 0)
 
+	for i := 0; i < task.NMap; i++ {
+		reduceFileName := w.getReduceFileName(i, task.Seq)
+		reduceFile, err := os.Open(reduceFileName)
+		if err != nil {
+			w.logger.Error("Failed to open reduce file: %s, err: %s", reduceFileName, err)
+			w.reportTask(task, false)
+			return
+		}
+
+		decoder := json.NewDecoder(reduceFile)
+		for {
+			var kv KeyValue
+			if err := decoder.Decode(&kv); err != nil {
+				w.logger.Error("Failed to decode kv, err: %s", err)
+				break
+			}
+			kvs = append(kvs, kv)
+		}
+		_ = reduceFile.Close()
+	}
+
+	sort.Sort(ByKey(kvs))
+
+	var result []string
+	i := 0
+	for i < len(kvs) {
+		j := i + 1
+		for j < len(kvs) && kvs[j].Key == kvs[i].Key {
+			j++
+		}
+		var values []string
+		for k := i; k < j; k++ {
+			values = append(values, kvs[k].Value)
+		}
+		res := w.reduceFunc(kvs[i].Key, values)
+		result = append(result, fmt.Sprintf("%v %v\n", kvs[i].Key, res))
+		i = j
+	}
+
+	mergeFileName := w.getMergeFileName(task.Seq)
+	if err := ioutil.WriteFile(mergeFileName, []byte(strings.Join(result, "")), 0600); err != nil {
+		w.logger.Error("Failed to write to merge file: %s, result: %v, err: %s", mergeFileName, result, err)
+		w.reportTask(task, false)
+		return
+	}
+
+	w.reportTask(task, true)
 }
 
-// reportTask reports task state to the Coordinator.
+// reportTask reports task state to the coordinator.
 func (w *worker) reportTask(task Task, done bool) {
 	args := &ReportTaskArgs{
 		Seq:      task.Seq,
