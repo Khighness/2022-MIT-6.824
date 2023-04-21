@@ -32,7 +32,6 @@ func (r RequestVoteReply) String() string {
 func (rf *Raft) startElection() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persistState()
 
 	if rf.isLeader() {
 		return
@@ -40,6 +39,7 @@ func (rf *Raft) startElection() {
 
 	rf.logger.Infof("%s Start election", rf)
 	rf.becomeCandidate()
+	defer rf.persistState()
 
 	if rf.isStandalone() {
 		rf.logger.Infof("%s Run in standalone mode, become leader at %d directly", rf, rf.term)
@@ -133,7 +133,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persistState()
 
 	reply.Term = rf.term
 	reply.Voted = false
@@ -161,8 +160,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	rf.vote = args.CandidateId
-	reply.Voted = true
+	rf.persistState()
 	rf.tick.resetElectionTimeoutTicker()
+	reply.Voted = true
 }
 
 // sendRequestVote calls RequestVote RPC.

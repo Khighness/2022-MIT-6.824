@@ -210,7 +210,6 @@ func (rf *Raft) readPersist(state []byte) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persistState()
 
 	if !rf.isLeader() {
 		return None, None, false
@@ -264,7 +263,6 @@ func (rf *Raft) becomeFollower(term int, lead int) {
 	rf.vote = None
 	rf.lead = lead
 
-	rf.persistState()
 	rf.tick.stopLogReplicationTicker()
 	rf.tick.resetElectionTimeoutTicker()
 }
@@ -285,7 +283,6 @@ func (rf *Raft) becomeCandidate() {
 	rf.vote = rf.id
 	rf.ballotBox[rf.id] = true
 
-	rf.persistState()
 	rf.tick.stopLogReplicationTicker()
 	rf.tick.resetElectionTimeoutTicker()
 }
@@ -312,7 +309,6 @@ func (rf *Raft) becomeLeader() {
 	// Broadcast heartbeat immediately。
 	go rf.replicateLog(true)
 
-	rf.persistState()
 	rf.tick.stopElectionTimeoutTicker()
 	rf.tick.resetLogReplicationTicker()
 }

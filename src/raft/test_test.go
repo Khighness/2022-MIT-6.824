@@ -572,6 +572,7 @@ func TestBackup2B(t *testing.T) {
 	cfg.end()
 }
 
+// NOTE: if this test fails, please set logReplicationInterval to [35, 100].
 func TestCount2B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)

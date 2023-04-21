@@ -125,7 +125,6 @@ func (rf *Raft) sendAppendEntriesToPeer(peer int) {
 func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persistState()
 
 	if !rf.isLeader() {
 		return
@@ -135,6 +134,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, reply AppendEntriesReply) {
 		rf.logger.Infof("%s AER term(%d) > current term(%d), become follower at term: %d",
 			rf, reply.Term, rf.term, reply.Term)
 		rf.becomeFollower(reply.Term, None)
+		rf.persistState()
 		return
 	}
 
@@ -198,6 +198,7 @@ func (rf *Raft) tryAdvanceCommitted() {
 	l := rf.raftLog
 	if committedQuorum > l.committed && l.EntryAt(committedQuorum).Term == rf.term {
 		rf.raftLog.CommitTo(committedQuorum)
+		rf.persistState()
 		rf.logger.Infof("%s Advance committed index to: %d", rf, committedQuorum)
 		rf.notifyApplyCh <- applySignal
 
@@ -213,7 +214,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persistState()
 
 	reply.Term = rf.term
 	reply.Success = false
@@ -293,6 +293,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.becomeFollower(args.Term, args.LeaderId)
 	}
 
+	rf.persistState()
 	reply.Success = true
 	reply.LogIndex = l.LastIndex()
 }
