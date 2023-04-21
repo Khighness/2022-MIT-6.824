@@ -58,36 +58,42 @@ func (c *Coordinator) Done() bool {
 }
 
 // RegisterWorker processes rpc logic of worker registry.
-func (c *Coordinator) RegisterWorker(args *RegisterArgs, reply *RegisterReply) {
+func (c *Coordinator) RegisterWorker(args *RegisterArgs, reply *RegisterReply) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.workerSeq++
 	reply.WorkerId = c.workerSeq
 	c.logger.Infof("Worker [%d] registered", reply.WorkerId)
+	return nil
 }
 
 // ApplyTask processes rpc logic that worker applies for task.
-func (c *Coordinator) ApplyTask(args *ApplyTaskArgs, reply *ApplyTaskReply) {
+func (c *Coordinator) ApplyTask(args *ApplyTaskArgs, reply *ApplyTaskReply) error {
 	task := c.popTask(args.WorkerId)
 	reply.Task = &task
 	c.logger.Infof("Worker [%d] get task: %+v", task)
+	return nil
 }
 
 // ApplyTask processes rpc logic that worker reports task status.
-func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) {
+func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.logger.Infof("Worker [%d] report task: %+v", args)
 	taskState := c.taskStates[args.Seq]
-	if c.taskPhase != args.Phase || taskState.workerId != args.WorkerId {
-		return
+	if c.taskPhase != args.Phase {
+		return fmt.Errorf("unexpected state for task %d: %d", args.Seq, args.Phase)
+	}
+	if taskState.workerId != args.WorkerId {
+		return fmt.Errorf("task %d has been allocated to another worker", args.Seq)
 	}
 
 	if args.Done {
 		taskState.status = TaskStatusFinished
 	}
+	return nil
 }
 
 // scheduleTaskPeriodically schedules task per

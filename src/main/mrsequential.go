@@ -32,8 +32,8 @@ func main() {
 
 	//
 	// read each input file,
-	// pass it to StateMap,
-	// accumulate the intermediate StateMap output.
+	// pass it to Map,
+	// accumulate the intermediate Map output.
 	//
 	intermediate := []mr.KeyValue{}
 	for _, filename := range os.Args[2:] {
@@ -62,7 +62,7 @@ func main() {
 	ofile, _ := os.Create(oname)
 
 	//
-	// call StateReduce on each distinct key in intermediate[],
+	// call Reduce on each distinct key in intermediate[],
 	// and print the result to mr-out-0.
 	//
 	i := 0
@@ -77,7 +77,7 @@ func main() {
 		}
 		output := reducef(intermediate[i].Key, values)
 
-		// this is the correct format for each line of StateReduce output.
+		// this is the correct format for each line of Reduce output.
 		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
 
 		i = j
@@ -87,7 +87,7 @@ func main() {
 }
 
 //
-// load the application StateMap and StateReduce functions
+// load the application Map and Reduce functions
 // from a plugin file, e.g. ../mrapps/wc.so
 //
 func loadPlugin(filename string) (func(string, string) []mr.KeyValue, func(string, []string) string) {
@@ -95,14 +95,14 @@ func loadPlugin(filename string) (func(string, string) []mr.KeyValue, func(strin
 	if err != nil {
 		log.Fatalf("cannot load plugin %v", filename)
 	}
-	xmapf, err := p.Lookup("StateMap")
+	xmapf, err := p.Lookup("Map")
 	if err != nil {
-		log.Fatalf("cannot find StateMap in %v", filename)
+		log.Fatalf("cannot find Map in %v", filename)
 	}
 	mapf := xmapf.(func(string, string) []mr.KeyValue)
-	xreducef, err := p.Lookup("StateReduce")
+	xreducef, err := p.Lookup("Reduce")
 	if err != nil {
-		log.Fatalf("cannot find StateReduce in %v", filename)
+		log.Fatalf("cannot find Reduce in %v", filename)
 	}
 	reducef := xreducef.(func(string, []string) string)
 

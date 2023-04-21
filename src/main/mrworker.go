@@ -28,7 +28,7 @@ func main() {
 }
 
 //
-// load the application StateMap and StateReduce functions
+// load the application Map and Reduce functions
 // from a plugin file, e.g. ../mrapps/wc.so
 //
 func loadPlugin(filename string) (func(string, string) []mr.KeyValue, func(string, []string) string) {
@@ -36,14 +36,14 @@ func loadPlugin(filename string) (func(string, string) []mr.KeyValue, func(strin
 	if err != nil {
 		log.Fatalf("cannot load plugin %v", filename)
 	}
-	xmapf, err := p.Lookup("StateMap")
+	xmapf, err := p.Lookup("Map")
 	if err != nil {
-		log.Fatalf("cannot find StateMap in %v", filename)
+		log.Fatalf("cannot find Map in %v", filename)
 	}
 	mapf := xmapf.(func(string, string) []mr.KeyValue)
-	xreducef, err := p.Lookup("StateReduce")
+	xreducef, err := p.Lookup("Reduce")
 	if err != nil {
-		log.Fatalf("cannot find StateReduce in %v", filename)
+		log.Fatalf("cannot find Reduce in %v", filename)
 	}
 	reducef := xreducef.(func(string, []string) string)
 
