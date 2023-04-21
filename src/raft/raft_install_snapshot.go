@@ -31,24 +31,8 @@ func (a InstallSnapshotReply) String() string {
 // A service wants to switch to snapshot.  Only do so if Raft hasn't
 // have more recent info since it communicate the snapshot on applyCh.
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
-	rf.mu.Lock()
-	if !rf.isLastIncludedIndexValid(lastIncludedIndex) {
-		rf.logger.Infof("%s CondInstallSnapshot, log: %s, invalid index: %d", rf, rf.raftLog, lastIncludedIndex)
-		rf.mu.Unlock()
-		return false
-	}
-	rf.mu.Unlock()
-
 	rf.doApplyInstallSnapshot(lastIncludedTerm, lastIncludedIndex, snapshot)
 	return true
-}
-
-// isLastIncludedIndexValid checks if the lastIncludedIndex is valid.
-func (rf *Raft) isLastIncludedIndexValid(lastIncludedIndex int) bool {
-	l := rf.raftLog
-	return lastIncludedIndex >= l.lastIncludedIndex && // The lastIncludedIndex can not be less than the old one.
-		lastIncludedIndex >= l.committed && // The lastIncludedIndex can not be less the committed index.
-		l.committed == l.applied // All the committed entries must been applied.
 }
 
 // sendInstallSnapshotToPeer sends InstallSnapshotArgs to the specified peer.
@@ -131,6 +115,11 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.mu.Unlock()
 
 	rf.doApplyInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
+}
+
+// isLastIncludedIndexValid checks if the lastIncludedIndex is valid.
+func (rf *Raft) isLastIncludedIndexValid(lastIncludedIndex int) bool {
+	return lastIncludedIndex >= rf.raftLog.lastIncludedIndex
 }
 
 // doApplyInstallSnapshot does applying snapshot.

@@ -341,22 +341,33 @@ func (rf *Raft) applyCommand() {
 	rf.mu.Lock()
 
 	l := rf.raftLog
+	if l.applied < l.lastIncludedIndex {
+		rf.mu.Unlock()
+		rf.CondInstallSnapshot(l.lastIncludedTerm, l.lastIncludedIndex, rf.persister.ReadSnapshot())
+		return
+	}
+
 	if l.applied < l.committed {
+		var applyMsgList []ApplyMsg
 		for idx := l.applied + 1; idx <= l.committed; idx++ {
 			entry := l.EntryAt(idx)
-			rf.mu.Unlock()
-
 			applyMsg := ApplyMsg{
 				CommandValid: true,
 				Command:      entry.Data,
 				CommandIndex: entry.Index,
 			}
-			rf.applyCh <- applyMsg
-
-			rf.mu.Lock()
-			l.ApplyTo(idx)
-			rf.logger.Infof("%s Apply entry: %+v", rf, entry)
+			applyMsgList = append(applyMsgList, applyMsg)
 		}
+		rf.mu.Unlock()
+
+		for _, applyMsg := range applyMsgList {
+			rf.applyCh <- applyMsg
+			rf.mu.Lock()
+			l.ApplyTo(applyMsg.CommandIndex)
+			rf.logger.Infof("%s Apply command: [Index=%d, Data=%v]", rf, applyMsg.CommandIndex, applyMsg.Command)
+			rf.mu.Unlock()
+		}
+		return
 	}
 
 	rf.mu.Unlock()
