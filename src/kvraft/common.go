@@ -8,29 +8,23 @@ const (
 
 type Err string
 
-// PutAppendArgs structure.
-type PutAppendArgs struct {
+const (
+	MethodGet    = "Get"
+	MethodPut    = "Put"
+	MethodAppend = "Append"
+)
+
+// KVRequest structure.
+type KVRequest struct {
 	Key       string
 	Value     string
-	Op        string // "Put" or "Append"
-	ClientId  int
-	CommandId int
+	Method    string
+	ClientId  int64
+	CommandId int64
 }
 
-// PutAppendReply structure.
-type PutAppendReply struct {
-	Err Err
-}
-
-// GetArgs structure.
-type GetArgs struct {
-	Key       string
-	ClientId  int
-	CommandId int
-}
-
-// GetReply structure.
-type GetReply struct {
+// KVResponse structure.
+type KVResponse struct {
 	Err   Err
 	Value string
 }
