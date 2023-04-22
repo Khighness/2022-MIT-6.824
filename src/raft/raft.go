@@ -161,7 +161,7 @@ func (rf *Raft) persistStateAndSnapshot(snapshot []byte) {
 	rf.persister.SaveSnapshot(snapshot)
 }
 
-// readPersist restores previously persisted state and snapshot.
+// readPersist restores previously persisted state.
 func (rf *Raft) readPersist(state []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -361,9 +361,10 @@ func (rf *Raft) applyCommand() {
 		rf.mu.Unlock()
 
 		for _, applyMsg := range applyMsgList {
-			rf.applyCh <- applyMsg
 			rf.mu.Lock()
-			if applyMsg.CommandIndex < l.applied {
+
+			// If the applied index is updated by snapshot, the apply msg should be ignored.
+			if applyMsg.CommandIndex <= l.applied {
 				rf.mu.Unlock()
 				continue
 			}
@@ -371,6 +372,8 @@ func (rf *Raft) applyCommand() {
 			l.ApplyTo(applyMsg.CommandIndex)
 			rf.logger.Infof("%s Apply command: [Index=%d, Data=%v]", rf, applyMsg.CommandIndex, applyMsg.Command)
 			rf.mu.Unlock()
+
+			rf.applyCh <- applyMsg
 		}
 		return
 	}
