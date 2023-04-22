@@ -1,13 +1,13 @@
 package kvraft
 
 import (
-	"6.824/log"
 	"bytes"
 	"sync"
 	"sync/atomic"
 
 	"6.824/labgob"
 	"6.824/labrpc"
+	"6.824/log"
 	"6.824/raft"
 
 	"go.uber.org/zap"
@@ -66,24 +66,6 @@ type KVServer struct {
 	responseCh map[int64]chan Re // the channel to send response
 
 	logger *zap.SugaredLogger
-}
-
-// lock tries to acquire lock with action log.
-func (kv *KVServer) lock() {
-	if enableLockLog {
-		action := getCalledFunction()
-		kv.logger.Infof("%s Try to lock for: %s", kv.rf, action)
-		defer kv.logger.Infof("%s Succeed to lock for: %s", kv.rf, action)
-	}
-	kv.mu.Lock()
-}
-
-// lock tries to release lock with action log.
-func (kv *KVServer) unlock() {
-	kv.mu.Unlock()
-	if enableLockLog {
-		kv.logger.Infof("%s Succeed to unlock after: %s", kv.rf, getCalledFunction())
-	}
 }
 
 // Kill sets the server to dead and stop the raft.
@@ -151,20 +133,19 @@ func (kv *KVServer) ExecCommand(request *KVRequest, response *KVResponse) {
 
 // waitCommand waits for command execution to complete.
 func (kv *KVServer) waitCommand(op Op, response *KVResponse) {
-	index, _, isLeader := kv.rf.Start(op)
+	_, _, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		response.Err = ErrWrongLeader
 		return
 	}
-	kv.logger.Infof("%s Propose command: [index=%d, data=%v]", kv.rf, index, op)
 
-	kv.lock()
+	kv.mu.Lock()
 	notifyReCh := make(chan Re, 1)
 	kv.responseCh[op.RequestId] = notifyReCh
-	kv.unlock()
+	kv.mu.Unlock()
 
 	re := <-notifyReCh
-	kv.removeNotifyReCh(op.RequestId)
+	kv.removeResponseCh(op.RequestId)
 	response.Err = re.Err
 	response.Value = re.Value
 }
@@ -177,10 +158,10 @@ func (kv *KVServer) sendResponse(requestId int64, err Err, value string) {
 }
 
 // removeNotifyReCh removes the response channel according to the request id.
-func (kv *KVServer) removeNotifyReCh(requestId int64) {
-	kv.lock()
-	defer kv.unlock()
-	delete(kv.responseCh, requestId)
+func (kv *KVServer) removeResponseCh(reqId int64) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	delete(kv.responseCh, reqId)
 }
 
 // handleRaftReady handles the applied messages from Raft.
@@ -189,9 +170,9 @@ func (kv *KVServer) handleRaftReady() {
 		select {
 		case applyMsg := <-kv.applyCh:
 			if applyMsg.SnapshotValid {
-				kv.lock()
+				kv.mu.Lock()
 				kv.readPersist(false, applyMsg.SnapshotTerm, applyMsg.CommandIndex, applyMsg.Snapshot)
-				kv.unlock()
+				kv.mu.Unlock()
 			} else {
 				kv.handleCommand(applyMsg)
 			}
@@ -207,9 +188,9 @@ func (kv *KVServer) handleCommand(applyMsg raft.ApplyMsg) {
 		return
 	}
 
-	kv.lock()
-	defer kv.unlock()
 	kv.logger.Infof("%s Apply command: [index=%d, data=%v]", kv.rf, applyMsg.CommandIndex, applyMsg.Command)
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 
 	op := applyMsg.Command.(Op)
 	switch op.Method {
@@ -263,6 +244,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persiste
 
 	kv.maxRaftState = maxRaftState
 	kv.persister = persister
+	kv.readPersist(true, 0, 0, kv.persister.ReadSnapshot())
 
 	kv.keyValData = make(map[string]string)
 	kv.appliedMap = make(map[int64]int64)
