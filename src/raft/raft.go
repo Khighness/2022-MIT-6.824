@@ -179,7 +179,7 @@ func (rf *Raft) readPersist(state []byte) {
 		vote int
 	)
 	if statDecoder.Decode(&term) != nil || statDecoder.Decode(&vote) != nil {
-		rf.logger.Panic("failed to decode raft state from persist data")
+		rf.logger.Panic("Failed to decode raft state from persistent data")
 	}
 	rf.term = term
 	rf.vote = vote
