@@ -79,9 +79,10 @@ func (ck *Clerk) Append(key string, value string) {
 }
 
 // sendRequest sends the request to KVServer and returns the response.
-func (ck *Clerk) sendRequest(request KVRequest) (response KVResponse) {
+func (ck *Clerk) sendRequest(request KVRequest) KVResponse {
 	leaderId := ck.leaderId
 	for {
+		var response KVResponse
 		if ok := ck.servers[leaderId].Call("KVServer.ExecCommand", &request, &response); !ok {
 			ck.logger.Warnf("Failed to send request: %+v", request)
 		}
@@ -89,10 +90,10 @@ func (ck *Clerk) sendRequest(request KVRequest) (response KVResponse) {
 		switch response.Err {
 		case OK:
 			ck.leaderId = leaderId
-			return
+			return response
 		case ErrNoKey:
 			ck.leaderId = leaderId
-			return
+			return response
 		default:
 			time.Sleep(retryInterval)
 			leaderId = (leaderId + 1) % len(ck.servers)

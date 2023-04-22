@@ -1,13 +1,13 @@
 package kvraft
 
 import (
+	"6.824/log"
 	"bytes"
 	"sync"
 	"sync/atomic"
 
 	"6.824/labgob"
 	"6.824/labrpc"
-	"6.824/log"
 	"6.824/raft"
 
 	"go.uber.org/zap"
@@ -56,6 +56,7 @@ type KVServer struct {
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
+	stopCh  chan struct{}
 
 	maxRaftState int             // snapshot if log grows this big
 	persister    *raft.Persister // hold this peer's persisted state
@@ -89,6 +90,8 @@ func (kv *KVServer) unlock() {
 func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
+	close(kv.stopCh)
+	kv.logger.Infof("%s server is stopped", kv.rf)
 }
 
 // killed checks is the server is killed.
@@ -182,7 +185,7 @@ func (kv *KVServer) removeNotifyReCh(requestId int64) {
 
 // handleRaftReady handles the applied messages from Raft.
 func (kv *KVServer) handleRaftReady() {
-	for !kv.killed() {
+	for {
 		select {
 		case applyMsg := <-kv.applyCh:
 			if applyMsg.SnapshotValid {
@@ -192,6 +195,8 @@ func (kv *KVServer) handleRaftReady() {
 			} else {
 				kv.handleCommand(applyMsg)
 			}
+		case <-kv.stopCh:
+			return
 		}
 	}
 }
@@ -253,15 +258,17 @@ func StartKVServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persiste
 
 	kv := new(KVServer)
 	kv.id = id
+	kv.applyCh = make(chan raft.ApplyMsg)
+	kv.stopCh = make(chan struct{})
+
 	kv.maxRaftState = maxRaftState
 	kv.persister = persister
 
 	kv.keyValData = make(map[string]string)
 	kv.appliedMap = make(map[int64]int64)
-	kv.logger = log.NewZapLogger("KVServer", zap.InfoLevel).Sugar()
-
-	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.responseCh = make(map[int64]chan Re)
+
+	kv.logger = log.NewZapLogger("KVServer", zap.InfoLevel).Sugar()
 	kv.rf = raft.Make(servers, id, persister, kv.applyCh)
 
 	go kv.handleRaftReady()
