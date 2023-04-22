@@ -112,7 +112,7 @@ func (rf *Raft) unlock() {
 	}
 }
 
-// GetState returns the peer's current state and if current peer is leader.
+// GetState returns the peer's current peer and if current peer is leader.
 func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
