@@ -21,10 +21,10 @@ const (
 )
 
 // NewZapLogger creates a zap.Logger.
-func NewZapLogger(log string) *zap.Logger {
+func NewZapLogger(log string, level zapcore.Level) *zap.Logger {
 	var core zapcore.Core
-	// fileCore := zapcore.NewCore(zapFileEncoder(), zapWriteSyncer(log), zapLevelEnabler())
-	consoleCore := zapcore.NewCore(zapConsoleEncoder(), os.Stdout, zapLevelEnabler())
+	// fileCore := zapcore.NewCore(zapFileEncoder(), zapWriteSyncer(log), level)
+	consoleCore := zapcore.NewCore(zapConsoleEncoder(), os.Stdout, level)
 	// core = zapcore.NewTee(fileCore, consoleCore)
 	core = zapcore.NewTee(consoleCore)
 	return zap.New(core, zap.AddCaller())

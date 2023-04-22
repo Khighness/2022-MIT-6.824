@@ -65,7 +65,7 @@ func NewRaftLog(entries []Entry, committed, applied int, lastSnapshotTerm, lastS
 		applied:           applied,
 		lastIncludedTerm:  lastSnapshotTerm,
 		lastIncludedIndex: lastSnapshotIndex,
-		logger:            log.NewZapLogger("RaftLog").Sugar(),
+		logger:            log.NewZapLogger("RaftLog", zap.WarnLevel).Sugar(),
 	}
 
 	if len(entries) == 0 { // Create a dummy entry.

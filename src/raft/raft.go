@@ -46,7 +46,7 @@ type Progress struct {
 	Match, Next int
 }
 
-// applySignal is a signal to notify leader to command.
+// applySignal is a signal to notify peer to apply command.
 var applySignal = struct{}{}
 
 // ApplyMsg structure.
@@ -82,7 +82,7 @@ type Raft struct {
 	// applyCh is a channel to deliver ApplyMsg.
 	applyCh chan ApplyMsg // Used to send ApplyMsg to state machine
 	// notifyApplyCh should be set to a relatively large value to avoid blocking.
-	notifyApplyCh chan struct{} // Used to notify peer deliver command
+	notifyApplyCh chan struct{} // Used to notify peer to apply command
 
 	logger *zap.SugaredLogger
 }
@@ -363,6 +363,11 @@ func (rf *Raft) applyCommand() {
 		for _, applyMsg := range applyMsgList {
 			rf.applyCh <- applyMsg
 			rf.mu.Lock()
+			if applyMsg.CommandIndex < l.applied {
+				rf.mu.Unlock()
+				continue
+			}
+
 			l.ApplyTo(applyMsg.CommandIndex)
 			rf.logger.Infof("%s Apply command: [Index=%d, Data=%v]", rf, applyMsg.CommandIndex, applyMsg.Command)
 			rf.mu.Unlock()
@@ -417,7 +422,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.applyCh = applyCh
 	rf.notifyApplyCh = make(chan struct{}, 300)
-	rf.logger = log.NewZapLogger("Raft").Sugar()
+	rf.logger = log.NewZapLogger("Raft", zap.PanicLevel).Sugar()
 	rf.logger.Infof("Start peer [%d] in raft cluster: %v", me, peers)
 
 	rf.readPersist(persister.ReadRaftState())

@@ -156,6 +156,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	lastEntry := rf.raftLog.LastEntry()
 	if lastEntry.Term > args.LastLogTerm ||
 		(lastEntry.Term == args.LastLogTerm && lastEntry.Index > args.LastLogIndex) {
+		rf.persistState()
 		return
 	}
 
