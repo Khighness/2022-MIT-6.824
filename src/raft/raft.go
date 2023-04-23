@@ -46,7 +46,7 @@ type Progress struct {
 	Match, Next int
 }
 
-// applySignal is a signal to notify leader to command.
+// applySignal is a signal to notify peer to apply command.
 var applySignal = struct{}{}
 
 // ApplyMsg structure.
@@ -82,7 +82,7 @@ type Raft struct {
 	// applyCh is a channel to deliver ApplyMsg.
 	applyCh chan ApplyMsg // Used to send ApplyMsg to state machine
 	// notifyApplyCh should be set to a relatively large value to avoid blocking.
-	notifyApplyCh chan struct{} // Used to notify peer deliver command
+	notifyApplyCh chan struct{} // Used to notify peer to apply command
 
 	logger *zap.SugaredLogger
 }
@@ -112,7 +112,7 @@ func (rf *Raft) unlock() {
 	}
 }
 
-// GetState returns the peer's current state and if current peer is leader.
+// GetState returns the peer's current peer and if current peer is leader.
 func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -161,7 +161,7 @@ func (rf *Raft) persistStateAndSnapshot(snapshot []byte) {
 	rf.persister.SaveSnapshot(snapshot)
 }
 
-// readPersist restores previously persisted state and snapshot.
+// readPersist restores previously persisted state.
 func (rf *Raft) readPersist(state []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -179,7 +179,7 @@ func (rf *Raft) readPersist(state []byte) {
 		vote int
 	)
 	if statDecoder.Decode(&term) != nil || statDecoder.Decode(&vote) != nil {
-		rf.logger.Panic("failed to decode raft state from persist data")
+		rf.logger.Panic("Failed to decode raft state from persistent data")
 	}
 	rf.term = term
 	rf.vote = vote
@@ -210,7 +210,6 @@ func (rf *Raft) readPersist(state []byte) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persistState()
 
 	if !rf.isLeader() {
 		return None, None, false
@@ -264,7 +263,6 @@ func (rf *Raft) becomeFollower(term int, lead int) {
 	rf.vote = None
 	rf.lead = lead
 
-	rf.persistState()
 	rf.tick.stopLogReplicationTicker()
 	rf.tick.resetElectionTimeoutTicker()
 }
@@ -285,7 +283,6 @@ func (rf *Raft) becomeCandidate() {
 	rf.vote = rf.id
 	rf.ballotBox[rf.id] = true
 
-	rf.persistState()
 	rf.tick.stopLogReplicationTicker()
 	rf.tick.resetElectionTimeoutTicker()
 }
@@ -312,7 +309,6 @@ func (rf *Raft) becomeLeader() {
 	// Broadcast heartbeat immediately。
 	go rf.replicateLog(true)
 
-	rf.persistState()
 	rf.tick.stopElectionTimeoutTicker()
 	rf.tick.resetLogReplicationTicker()
 }
@@ -345,22 +341,41 @@ func (rf *Raft) applyCommand() {
 	rf.mu.Lock()
 
 	l := rf.raftLog
+	if l.applied < l.lastIncludedIndex {
+		rf.mu.Unlock()
+		rf.CondInstallSnapshot(l.lastIncludedTerm, l.lastIncludedIndex, rf.persister.ReadSnapshot())
+		return
+	}
+
 	if l.applied < l.committed {
+		var applyMsgList []ApplyMsg
 		for idx := l.applied + 1; idx <= l.committed; idx++ {
 			entry := l.EntryAt(idx)
-			rf.mu.Unlock()
-
 			applyMsg := ApplyMsg{
 				CommandValid: true,
 				Command:      entry.Data,
 				CommandIndex: entry.Index,
 			}
-			rf.applyCh <- applyMsg
-
-			rf.mu.Lock()
-			l.ApplyTo(idx)
-			rf.logger.Infof("%s Apply entry: %+v", rf, entry)
+			applyMsgList = append(applyMsgList, applyMsg)
 		}
+		rf.mu.Unlock()
+
+		for _, applyMsg := range applyMsgList {
+			rf.mu.Lock()
+
+			// If the applied index is updated by snapshot, the apply msg should be ignored.
+			if applyMsg.CommandIndex <= l.applied {
+				rf.mu.Unlock()
+				continue
+			}
+
+			l.ApplyTo(applyMsg.CommandIndex)
+			rf.logger.Infof("%s Apply command: [Index=%d, Data=%v]", rf, applyMsg.CommandIndex, applyMsg.Command)
+			rf.mu.Unlock()
+
+			rf.applyCh <- applyMsg
+		}
+		return
 	}
 
 	rf.mu.Unlock()
@@ -410,7 +425,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.applyCh = applyCh
 	rf.notifyApplyCh = make(chan struct{}, 300)
-	rf.logger = log.NewZapLogger("Raft").Sugar()
+	rf.logger = log.NewZapLogger("Raft", zap.PanicLevel).Sugar()
 	rf.logger.Infof("Start peer [%d] in raft cluster: %v", me, peers)
 
 	rf.readPersist(persister.ReadRaftState())

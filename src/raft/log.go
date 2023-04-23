@@ -65,7 +65,7 @@ func NewRaftLog(entries []Entry, committed, applied int, lastSnapshotTerm, lastS
 		applied:           applied,
 		lastIncludedTerm:  lastSnapshotTerm,
 		lastIncludedIndex: lastSnapshotIndex,
-		logger:            log.NewZapLogger("RaftLog").Sugar(),
+		logger:            log.NewZapLogger("RaftLog", zap.WarnLevel).Sugar(),
 	}
 
 	if len(entries) == 0 { // Create a dummy entry.
@@ -226,10 +226,10 @@ func (l *RaftLog) Apply(index int, term int) *RaftLog {
 		l = NewRaftLog(nil, index, index, term, index)
 	} else {
 		l.CompactTo(index)
+		l.committed = index
+		l.applied = index
 	}
 
-	l.committed = index
-	l.applied = index
 	return l
 }
 
