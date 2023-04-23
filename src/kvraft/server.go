@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"6.824/labgob"
 	"6.824/labrpc"
@@ -11,6 +12,11 @@ import (
 	"6.824/raft"
 
 	"go.uber.org/zap"
+)
+
+const (
+	emptyValue  = ""
+	execTimeOut = 500 * time.Millisecond
 )
 
 // Op structure.
@@ -73,27 +79,13 @@ func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
 	close(kv.stopCh)
-	kv.logger.Infof("%s server is stopped", kv.rf)
+	kv.logger.Infof("%s Server is stopped", kv.rf)
 }
 
 // killed checks is the server is killed.
 func (kv *KVServer) killed() bool {
 	z := atomic.LoadInt32(&kv.dead)
 	return z == 1
-}
-
-// maybeSaveSnapshot saves snapshot if the size of raft state exceeds maxRaftState.
-func (kv *KVServer) maybeSaveSnapshot(logIndex int) {
-	if kv.maxRaftState == -1 || kv.persister.RaftStateSize() < kv.maxRaftState {
-		return
-	}
-
-	buffer := new(bytes.Buffer)
-	encoder := labgob.NewEncoder(buffer)
-	if encoder.Encode(kv.keyValData) != nil || encoder.Encode(kv.appliedMap) != nil {
-		kv.logger.Panic("Failed to encode server state")
-	}
-	kv.rf.Snapshot(logIndex, buffer.Bytes())
 }
 
 // readPersist restores state or installs leader's snapshot.
@@ -121,6 +113,21 @@ func (kv *KVServer) readPersist(isInit bool, snapshotTerm, snapshotIndex int, sn
 	kv.appliedMap = appliedMap
 }
 
+// maybeSaveSnapshot saves snapshot if the size of raft state exceeds maxRaftState.
+func (kv *KVServer) maybeSaveSnapshot(logIndex int) {
+	if kv.maxRaftState == -1 || kv.persister.RaftStateSize() < kv.maxRaftState {
+		return
+	}
+
+	buffer := new(bytes.Buffer)
+	encoder := labgob.NewEncoder(buffer)
+	if encoder.Encode(kv.keyValData) != nil || encoder.Encode(kv.appliedMap) != nil {
+		kv.logger.Panic("Failed to encode server state")
+	}
+	kv.rf.Snapshot(logIndex, buffer.Bytes())
+	kv.logger.Infof("%s Snapshot to: %d", kv.rf, logIndex)
+}
+
 // ExecCommand executes command from clerk.
 func (kv *KVServer) ExecCommand(request *KVRequest, response *KVResponse) {
 	if _, isLeader := kv.rf.GetState(); !isLeader {
@@ -140,14 +147,26 @@ func (kv *KVServer) waitCommand(op Op, response *KVResponse) {
 	}
 
 	kv.mu.Lock()
-	notifyReCh := make(chan Re, 1)
-	kv.responseCh[op.RequestId] = notifyReCh
+	responseCh := make(chan Re, 1)
+	kv.responseCh[op.RequestId] = responseCh
 	kv.mu.Unlock()
 
-	re := <-notifyReCh
-	kv.removeResponseCh(op.RequestId)
-	response.Err = re.Err
-	response.Value = re.Value
+	timer := time.NewTimer(execTimeOut)
+	select {
+	case <-kv.stopCh:
+		kv.removeResponseCh(op.RequestId)
+		response.Err = ErrServerStopped
+		return
+	case <-timer.C:
+		kv.removeResponseCh(op.RequestId)
+		response.Err = ErrExecTimeout
+		return
+	case re := <-responseCh:
+		kv.removeResponseCh(op.RequestId)
+		response.Err = re.Err
+		response.Value = re.Value
+		return
+	}
 }
 
 // sendResponse sends response.
@@ -168,6 +187,8 @@ func (kv *KVServer) removeResponseCh(reqId int64) {
 func (kv *KVServer) handleRaftReady() {
 	for {
 		select {
+		case <-kv.stopCh:
+			return
 		case applyMsg := <-kv.applyCh:
 			if applyMsg.SnapshotValid {
 				kv.mu.Lock()
@@ -176,29 +197,31 @@ func (kv *KVServer) handleRaftReady() {
 			} else {
 				kv.handleCommand(applyMsg)
 			}
-		case <-kv.stopCh:
-			return
 		}
 	}
 }
 
 // handleCommand handles applied command.
-func (kv *KVServer) handleCommand(applyMsg raft.ApplyMsg) {
-	if !applyMsg.CommandValid {
+func (kv *KVServer) handleCommand(command raft.ApplyMsg) {
+	if !command.CommandValid {
 		return
 	}
 
-	kv.logger.Infof("%s Apply command: [index=%d, data=%v]", kv.rf, applyMsg.CommandIndex, applyMsg.Command)
+	kv.logger.Infof("%s Apply command: [index=%d, data=%v]", kv.rf, command.CommandIndex, command.Command)
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	op := applyMsg.Command.(Op)
+	op := command.Command.(Op)
 	switch op.Method {
 	case MethodGet:
 		kv.handleGetOp(op)
 	case MethodPut, MethodAppend:
-		kv.handlePutOrAppendOp(op, applyMsg.CommandIndex)
+		kv.handlePutOrAppendOp(op)
+	default:
+		kv.logger.Panic("Undefined method: " + op.Method)
 	}
+
+	kv.maybeSaveSnapshot(command.CommandIndex)
 }
 
 // handleGetOp handles get operation.
@@ -211,9 +234,10 @@ func (kv *KVServer) handleGetOp(op Op) {
 }
 
 // handlePutOrAppendOp handles put or append operation.
-func (kv *KVServer) handlePutOrAppendOp(op Op, index int) {
+func (kv *KVServer) handlePutOrAppendOp(op Op) {
 	// Ensure idempotence.
 	if lastCommandId, ok := kv.appliedMap[op.ClientId]; ok && lastCommandId == op.CommandId {
+		kv.sendResponse(op.RequestId, OK, emptyValue)
 		return
 	}
 
@@ -230,7 +254,6 @@ func (kv *KVServer) handlePutOrAppendOp(op Op, index int) {
 
 	kv.appliedMap[op.ClientId] = op.CommandId
 	kv.sendResponse(op.RequestId, OK, emptyValue)
-	kv.maybeSaveSnapshot(index)
 }
 
 // StartKVServer starts a KVServer.
@@ -244,13 +267,13 @@ func StartKVServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persiste
 
 	kv.maxRaftState = maxRaftState
 	kv.persister = persister
-	kv.readPersist(true, 0, 0, kv.persister.ReadSnapshot())
 
 	kv.keyValData = make(map[string]string)
 	kv.appliedMap = make(map[int64]int64)
 	kv.responseCh = make(map[int64]chan Re)
 
-	kv.logger = log.NewZapLogger("KVServer", zap.InfoLevel).Sugar()
+	kv.readPersist(true, 0, 0, kv.persister.ReadSnapshot())
+	kv.logger = log.NewZapLogger("KVServer", zap.WarnLevel).Sugar()
 	kv.rf = raft.Make(servers, id, persister, kv.applyCh)
 
 	go kv.handleRaftReady()

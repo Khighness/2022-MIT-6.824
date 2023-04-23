@@ -8,7 +8,7 @@ import (
 // @Update 2023-04-08
 
 const (
-	logReplicationInterval = time.Duration(35) * time.Millisecond
+	logReplicationInterval = time.Duration(20) * time.Millisecond
 	electionTimeoutLower   = time.Duration(300) * time.Millisecond
 	electionTimeoutUpper   = time.Duration(600) * time.Millisecond
 )

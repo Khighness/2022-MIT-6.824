@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	emptyValue    = ""
 	retryInterval = 10 * time.Millisecond
 )
 
