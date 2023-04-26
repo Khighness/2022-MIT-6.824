@@ -8,9 +8,9 @@
   - [x] Lab 2B: Log Replication 
   - [x] Lab 2C: Persistence
   - [x] Lab 2D: Log Compaction
-- [ ] [Lab 3: Fault-tolerant Key-Value Service]()
-  - [ ] Lab 3A: Key-Value Service
-  - [ ] Lab 3B: Snapshot
+- [x] [Lab 3: Fault-tolerant Key-Value Service](https://github.com/Khighness/2022-MIT-6.824/tree/master/src/kvraft)
+  - [x] Lab 3A: Key-Value Service
+  - [x] Lab 3B: Snapshot
 - [ ] Lab 4: Sharded Key-Value Service
   - [ ] [Lab 4A: Shard Controller]()
   - [ ] [Lab 4B: Sharded Key-Value Server]()
