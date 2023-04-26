@@ -1,5 +1,7 @@
 package shardctrler
 
+import "6.824/labgob"
+
 //
 // Shard controler: assigns shards to replication groups.
 //
@@ -20,6 +22,27 @@ package shardctrler
 // The number of shards.
 const NShards = 10
 
+type Err string
+
+const (
+	OK             = "OK"
+	ErrWrongLeader = "ErrWrongLeader"
+	ErrTimeout     = "ErrTimeout"
+	ErrServer      = "ErrServer"
+)
+
+func init() {
+	labgob.Register(Config{})
+	labgob.Register(QueryArgs{})
+	labgob.Register(QueryReply{})
+	labgob.Register(JoinArgs{})
+	labgob.Register(JoinReply{})
+	labgob.Register(LeaveArgs{})
+	labgob.Register(LeaveReply{})
+	labgob.Register(MoveArgs{})
+	labgob.Register(MoveReply{})
+}
+
 // A configuration -- an assignment of shards to groups.
 // Please don't change this.
 type Config struct {
@@ -28,44 +51,65 @@ type Config struct {
 	Groups map[int][]string // gid -> servers[]
 }
 
-const (
-	OK = "OK"
-)
+// Copy return s new same Config instance.
+func (c *Config) Copy() Config {
+	config := Config{
+		Num:    c.Num,
+		Shards: c.Shards,
+		Groups: make(map[int][]string),
+	}
+	for gid, s := range c.Groups {
+		config.Groups[gid] = append([]string{}, s...)
+	}
+	return config
+}
 
-type Err string
+// IDGroup structure.
+type IDGroup struct {
+	ClientId  int64
+	CommandId int64
+}
 
+// JoinArgs structure.
 type JoinArgs struct {
 	Servers map[int][]string // new GID -> servers mappings
 }
 
+// JoinReply structure.
 type JoinReply struct {
 	WrongLeader bool
 	Err         Err
 }
 
+// LeaveArgs structure.
 type LeaveArgs struct {
 	GIDs []int
 }
 
+// LeaveReply structure.
 type LeaveReply struct {
 	WrongLeader bool
 	Err         Err
 }
 
+// MoveArgs structure.
 type MoveArgs struct {
 	Shard int
 	GID   int
 }
 
+// MoveReply structure.
 type MoveReply struct {
 	WrongLeader bool
 	Err         Err
 }
 
+// QueryArgs structure.
 type QueryArgs struct {
 	Num int // desired config number
 }
 
+// QueryReply structure.
 type QueryReply struct {
 	WrongLeader bool
 	Err         Err
