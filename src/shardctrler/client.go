@@ -47,7 +47,7 @@ func (ck *Clerk) Query(num int) Config {
 	}
 }
 
-// Join creates a new replication group according to the server map.
+// Join creates a new replication group according to the gid-servers map.
 func (ck *Clerk) Join(servers map[int][]string) {
 	args := &JoinArgs{}
 	args.Servers = servers
@@ -64,7 +64,9 @@ func (ck *Clerk) Join(servers map[int][]string) {
 	}
 }
 
-// Leave removes the servers according to the gids.
+// Leave removes the replication groups according to the gids
+// and redistributes the shards of the removed groups to the
+// remaining groups.
 func (ck *Clerk) Leave(gids []int) {
 	args := &LeaveArgs{}
 	args.GIDs = gids
@@ -81,7 +83,7 @@ func (ck *Clerk) Leave(gids []int) {
 	}
 }
 
-// Move moves the server corresponding to the gid to the replication group corresponding to the shard.
+// Move moves the specified shard to the replication group corresponding to the gid.
 func (ck *Clerk) Move(shard int, gid int) {
 	args := &MoveArgs{}
 	args.Shard = shard

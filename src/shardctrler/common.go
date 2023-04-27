@@ -31,6 +31,13 @@ const (
 	ErrServer      = "ErrServer"
 )
 
+const (
+	MethodQuery = "Query"
+	MethodJoin  = "Join"
+	MethodLeave = "Leave"
+	MethodMove  = "Move"
+)
+
 func init() {
 	labgob.Register(Config{})
 	labgob.Register(QueryArgs{})
@@ -73,6 +80,7 @@ type IDGroup struct {
 // JoinArgs structure.
 type JoinArgs struct {
 	Servers map[int][]string // new GID -> servers mappings
+	IDGroup
 }
 
 // JoinReply structure.
@@ -84,6 +92,7 @@ type JoinReply struct {
 // LeaveArgs structure.
 type LeaveArgs struct {
 	GIDs []int
+	IDGroup
 }
 
 // LeaveReply structure.
@@ -96,6 +105,7 @@ type LeaveReply struct {
 type MoveArgs struct {
 	Shard int
 	GID   int
+	IDGroup
 }
 
 // MoveReply structure.
@@ -107,6 +117,7 @@ type MoveReply struct {
 // QueryArgs structure.
 type QueryArgs struct {
 	Num int // desired config number
+	IDGroup
 }
 
 // QueryReply structure.
