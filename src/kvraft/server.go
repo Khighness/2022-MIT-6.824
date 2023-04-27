@@ -74,7 +74,7 @@ type KVServer struct {
 	logger *zap.SugaredLogger
 }
 
-// Kill sets the server to dead and stop the raft.
+// Kill sets the server to dead and stops the raft.
 func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
@@ -154,19 +154,15 @@ func (kv *KVServer) waitCommand(op Op, response *KVResponse) {
 	timer := time.NewTimer(execTimeOut)
 	select {
 	case <-kv.stopCh:
-		kv.removeResponseCh(op.RequestId)
 		response.Err = ErrServerStopped
-		return
 	case <-timer.C:
-		kv.removeResponseCh(op.RequestId)
 		response.Err = ErrExecTimeout
-		return
 	case re := <-responseCh:
-		kv.removeResponseCh(op.RequestId)
 		response.Err = re.Err
 		response.Value = re.Value
-		return
 	}
+
+	kv.removeResponseCh(op.RequestId)
 }
 
 // sendResponse sends response.
