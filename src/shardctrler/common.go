@@ -38,6 +38,8 @@ const (
 	MethodMove  = "Move"
 )
 
+var EmptyConfig = Config{}
+
 func init() {
 	labgob.Register(Config{})
 	labgob.Register(QueryArgs{})

@@ -1,6 +1,7 @@
 package shardctrler
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -82,7 +83,7 @@ func (sc *ShardCtrler) getConfig(num int) Config {
 	if num < 0 || num >= len(sc.configs) {
 		return sc.configs[len(sc.configs)-1]
 	}
-	return sc.configs[num]
+	return sc.configs[num].Copy()
 }
 
 // Query returns the config corresponding to the specified num.
@@ -95,7 +96,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	}
 	sc.mu.Unlock()
 
-	re := sc.waitCommand(args.CommandId, args.ClientId, args, MethodQuery)
+	re := sc.waitCommand(args.CommandId, args.ClientId, *args, MethodQuery)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -105,7 +106,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 
 // Join creates a new replication group according to the server map.
 func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
-	re := sc.waitCommand(args.CommandId, args.CommandId, args, MethodJoin)
+	re := sc.waitCommand(args.CommandId, args.CommandId, *args, MethodJoin)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -114,7 +115,7 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 
 // Leave removes the servers according to the gids.
 func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
-	re := sc.waitCommand(args.CommandId, args.CommandId, args, MethodLeave)
+	re := sc.waitCommand(args.CommandId, args.CommandId, *args, MethodLeave)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -123,7 +124,7 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 
 // Move moves the server corresponding to the gid to the replication group corresponding to the shard.
 func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
-	re := sc.waitCommand(args.CommandId, args.CommandId, args, MethodMove)
+	re := sc.waitCommand(args.CommandId, args.CommandId, *args, MethodMove)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -138,6 +139,9 @@ func (sc *ShardCtrler) waitCommand(commandId, clientId int64, args interface{}, 
 		re.Err = ErrWrongLeader
 		return
 	}
+
+	sc.logger.Infof("%s Request method: %s, args: %+v", sc.rf, method, args)
+	defer sc.logger.Infof("%s Response: %+v", sc.rf, re)
 
 	sc.mu.Lock()
 	responseCh := make(chan Re, 1)
@@ -193,6 +197,7 @@ func (sc *ShardCtrler) handleCommand(command raft.ApplyMsg) {
 		return
 	}
 
+	sc.logger.Infof("%s Apply command: [index=%d, data=%v]", sc.rf, command.CommandIndex, command.Command)
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
@@ -200,6 +205,27 @@ func (sc *ShardCtrler) handleCommand(command raft.ApplyMsg) {
 	switch op.Method {
 	case MethodQuery:
 		sc.handleQueryOp(op)
+	default:
+		sc.handleUpdateOp(op)
+	}
+}
+
+// handleQueryOp handles query operation.
+func (sc *ShardCtrler) handleQueryOp(op Op) {
+	config := sc.getConfig(op.Args.(QueryArgs).Num)
+	sc.sendResponse(op.RequestId, OK, config)
+}
+
+func (sc *ShardCtrler) handleUpdateOp(op Op) {
+	if lastCommandId, ok := sc.appliedMap[op.ClientId]; ok && lastCommandId == op.CommandId {
+		sc.sendResponse(op.RequestId, OK, EmptyConfig)
+		return
+	}
+
+	sc.logger.Infof("%s Before %s, last config: %+v", sc.rf, op.Method, sc.getConfig(-1))
+	defer sc.logger.Infof("%s After %s, last config: %+v", sc.rf, op.Method, sc.getConfig(-1))
+
+	switch op.Method {
 	case MethodJoin:
 		sc.handleJoinOp(op)
 	case MethodLeave:
@@ -211,12 +237,6 @@ func (sc *ShardCtrler) handleCommand(command raft.ApplyMsg) {
 	}
 }
 
-// handleQueryOp handles query operation.
-func (sc *ShardCtrler) handleQueryOp(op Op) {
-	config := sc.getConfig(op.Args.(QueryArgs).Num)
-	sc.sendResponse(op.RequestId, OK, config)
-}
-
 // handleJoinOp handles join operation.
 func (sc *ShardCtrler) handleJoinOp(op Op) {
 	config := sc.getConfig(-1)
@@ -225,8 +245,9 @@ func (sc *ShardCtrler) handleJoinOp(op Op) {
 		config.Groups[gid] = servers
 	}
 
-	sc.maybeRedistributeShards()
+	sc.adjustConfig(&config)
 	sc.configs = append(sc.configs, config)
+	sc.sendResponse(op.RequestId, OK, EmptyConfig)
 }
 
 // handleLeaveOp handles leave operation.
@@ -243,8 +264,9 @@ func (sc *ShardCtrler) handleLeaveOp(op Op) {
 		}
 	}
 
-	sc.maybeRedistributeShards()
+	sc.adjustConfig(&config)
 	sc.configs = append(sc.configs, config)
+	sc.sendResponse(op.RequestId, OK, EmptyConfig)
 }
 
 // handleMoveOp handles move operation.
@@ -254,11 +276,27 @@ func (sc *ShardCtrler) handleMoveOp(op Op) {
 	args := op.Args.(MoveArgs)
 	config.Shards[args.Shard] = args.GID
 	sc.configs = append(sc.configs, config)
+	sc.sendResponse(op.RequestId, OK, EmptyConfig)
 }
 
-// maybeRedistributeShards maybe redistribute shards.
-func (sc *ShardCtrler) maybeRedistributeShards() {
+// adjustConfig adjusts config.
+func (sc *ShardCtrler) adjustConfig(config *Config) {
+	gids := make([]int, 0)
+	for gid := range config.Groups {
+		gids = append(gids, gid)
+	}
 
+	if len(gids) == 0 {
+		for shard := range config.Shards {
+			config.Shards[shard] = 0
+		}
+	} else {
+		sort.Ints(gids)
+		total := len(gids)
+		for shard := range config.Shards {
+			config.Shards[shard] = gids[shard%total]
+		}
+	}
 }
 
 // StartServer starts a ShardCtrler.
@@ -267,7 +305,6 @@ func StartServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister)
 
 	sc := new(ShardCtrler)
 	sc.id = id
-
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.stopCh = make(chan struct{})
 	sc.rf = raft.Make(servers, id, persister, sc.applyCh)
@@ -279,6 +316,8 @@ func StartServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister)
 	sc.configs[0].Groups = map[int][]string{}
 
 	sc.logger = log.NewZapLogger("ShardCtrler", zap.InfoLevel).Sugar()
+
+	go sc.handleRaftReady()
 
 	return sc
 }
