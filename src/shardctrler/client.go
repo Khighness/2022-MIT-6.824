@@ -33,6 +33,8 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // Query fetches the config corresponding to the specified num.
 func (ck *Clerk) Query(num int) Config {
 	args := &QueryArgs{}
+	args.ClientId = ck.clientId
+	args.CommandId = randInt64()
 	args.Num = num
 
 	for {
@@ -50,6 +52,8 @@ func (ck *Clerk) Query(num int) Config {
 // Join creates a new replication group according to the gid-servers map.
 func (ck *Clerk) Join(servers map[int][]string) {
 	args := &JoinArgs{}
+	args.ClientId = ck.clientId
+	args.CommandId = randInt64()
 	args.Servers = servers
 
 	for {
@@ -69,6 +73,8 @@ func (ck *Clerk) Join(servers map[int][]string) {
 // remaining groups.
 func (ck *Clerk) Leave(gids []int) {
 	args := &LeaveArgs{}
+	args.ClientId = ck.clientId
+	args.CommandId = randInt64()
 	args.GIDs = gids
 
 	for {
@@ -86,6 +92,8 @@ func (ck *Clerk) Leave(gids []int) {
 // Move moves the specified shard to the replication group corresponding to the gid.
 func (ck *Clerk) Move(shard int, gid int) {
 	args := &MoveArgs{}
+	args.ClientId = ck.clientId
+	args.CommandId = randInt64()
 	args.Shard = shard
 	args.GID = gid
 

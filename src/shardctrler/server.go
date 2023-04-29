@@ -81,7 +81,7 @@ func (sc *ShardCtrler) Raft() *raft.Raft {
 // If num is negative or out of bound, it returns the last config.
 func (sc *ShardCtrler) getConfig(num int) Config {
 	if num < 0 || num >= len(sc.configs) {
-		return sc.configs[len(sc.configs)-1]
+		return sc.configs[len(sc.configs)-1].Copy()
 	}
 	return sc.configs[num].Copy()
 }
@@ -216,14 +216,15 @@ func (sc *ShardCtrler) handleQueryOp(op Op) {
 	sc.sendResponse(op.RequestId, OK, config)
 }
 
+// handleUpdateOp handles update operation.
 func (sc *ShardCtrler) handleUpdateOp(op Op) {
 	if lastCommandId, ok := sc.appliedMap[op.ClientId]; ok && lastCommandId == op.CommandId {
 		sc.sendResponse(op.RequestId, OK, EmptyConfig)
 		return
 	}
 
-	sc.logger.Infof("%s Before %s, last config: %+v", sc.rf, op.Method, sc.getConfig(-1))
-	defer sc.logger.Infof("%s After %s, last config: %+v", sc.rf, op.Method, sc.getConfig(-1))
+	sc.logger.Infof("%s Before %s, config: %+v", sc.rf, op.Method, sc.configs)
+	defer sc.logger.Infof("%s After %s, config: %+v", sc.rf, op.Method, sc.configs)
 
 	switch op.Method {
 	case MethodJoin:
@@ -235,6 +236,9 @@ func (sc *ShardCtrler) handleUpdateOp(op Op) {
 	default:
 		sc.logger.Panicf("Undefined method: " + op.Method)
 	}
+
+	sc.appliedMap[op.ClientId] = op.CommandId
+	sc.sendResponse(op.RequestId, OK, EmptyConfig)
 }
 
 // handleJoinOp handles join operation.
@@ -247,7 +251,6 @@ func (sc *ShardCtrler) handleJoinOp(op Op) {
 
 	sc.adjustConfig(&config)
 	sc.configs = append(sc.configs, config)
-	sc.sendResponse(op.RequestId, OK, EmptyConfig)
 }
 
 // handleLeaveOp handles leave operation.
@@ -266,7 +269,6 @@ func (sc *ShardCtrler) handleLeaveOp(op Op) {
 
 	sc.adjustConfig(&config)
 	sc.configs = append(sc.configs, config)
-	sc.sendResponse(op.RequestId, OK, EmptyConfig)
 }
 
 // handleMoveOp handles move operation.
@@ -276,7 +278,6 @@ func (sc *ShardCtrler) handleMoveOp(op Op) {
 	args := op.Args.(MoveArgs)
 	config.Shards[args.Shard] = args.GID
 	sc.configs = append(sc.configs, config)
-	sc.sendResponse(op.RequestId, OK, EmptyConfig)
 }
 
 // adjustConfig adjusts config.
