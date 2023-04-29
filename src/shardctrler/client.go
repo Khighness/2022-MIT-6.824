@@ -1,39 +1,43 @@
 package shardctrler
 
-//
-// Shardctrler clerk.
-//
+import (
+	"crypto/rand"
+	"math/big"
+	"time"
 
-import "6.824/labrpc"
-import "time"
-import "crypto/rand"
-import "math/big"
+	"6.824/labrpc"
+)
 
+// Clerk (client) structure.
 type Clerk struct {
-	servers []*labrpc.ClientEnd
-	// Your data here.
+	servers  []*labrpc.ClientEnd
+	clientId int64
 }
 
-func nrand() int64 {
+// randInt64 generates a rand int value.
+func randInt64() int64 {
 	max := big.NewInt(int64(1) << 62)
 	bigx, _ := rand.Int(rand.Reader, max)
 	x := bigx.Int64()
 	return x
 }
 
+// MakeClerk creates a clerk.
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	// Your code here.
+	ck.clientId = randInt64()
 	return ck
 }
 
+// Query fetches the config corresponding to the specified num.
 func (ck *Clerk) Query(num int) Config {
 	args := &QueryArgs{}
-	// Your code here.
+	args.ClientId = ck.clientId
+	args.CommandId = randInt64()
 	args.Num = num
+
 	for {
-		// try each known server.
 		for _, srv := range ck.servers {
 			var reply QueryReply
 			ok := srv.Call("ShardCtrler.Query", args, &reply)
@@ -41,17 +45,18 @@ func (ck *Clerk) Query(num int) Config {
 				return reply.Config
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		ck.sleepOnce()
 	}
 }
 
+// Join creates a new replication group according to the gid-servers map.
 func (ck *Clerk) Join(servers map[int][]string) {
 	args := &JoinArgs{}
-	// Your code here.
+	args.ClientId = ck.clientId
+	args.CommandId = randInt64()
 	args.Servers = servers
 
 	for {
-		// try each known server.
 		for _, srv := range ck.servers {
 			var reply JoinReply
 			ok := srv.Call("ShardCtrler.Join", args, &reply)
@@ -59,17 +64,20 @@ func (ck *Clerk) Join(servers map[int][]string) {
 				return
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		ck.sleepOnce()
 	}
 }
 
+// Leave removes the replication groups according to the gids
+// and redistributes the shards of the removed groups to the
+// remaining groups.
 func (ck *Clerk) Leave(gids []int) {
 	args := &LeaveArgs{}
-	// Your code here.
+	args.ClientId = ck.clientId
+	args.CommandId = randInt64()
 	args.GIDs = gids
 
 	for {
-		// try each known server.
 		for _, srv := range ck.servers {
 			var reply LeaveReply
 			ok := srv.Call("ShardCtrler.Leave", args, &reply)
@@ -77,18 +85,19 @@ func (ck *Clerk) Leave(gids []int) {
 				return
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		ck.sleepOnce()
 	}
 }
 
+// Move moves the specified shard to the replication group corresponding to the gid.
 func (ck *Clerk) Move(shard int, gid int) {
 	args := &MoveArgs{}
-	// Your code here.
+	args.ClientId = ck.clientId
+	args.CommandId = randInt64()
 	args.Shard = shard
 	args.GID = gid
 
 	for {
-		// try each known server.
 		for _, srv := range ck.servers {
 			var reply MoveReply
 			ok := srv.Call("ShardCtrler.Move", args, &reply)
@@ -96,6 +105,11 @@ func (ck *Clerk) Move(shard int, gid int) {
 				return
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		ck.sleepOnce()
 	}
+}
+
+// sleepOnce pauses for a certain amount of time.
+func (ck *Clerk) sleepOnce() {
+	time.Sleep(100 * time.Millisecond)
 }
