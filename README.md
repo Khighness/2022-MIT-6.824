@@ -12,7 +12,7 @@
   - [x] Lab 3A: Key-Value Service
   - [x] Lab 3B: Snapshot
 - [ ] Lab 4: Sharded Key-Value Service
-  - [ ] [Lab 4A: Shard Controller]()
+  - [x] [Lab 4A: Shard Controller](https://github.com/Khighness/2022-MIT-6.824/tree/master/src/shardctrler)
   - [ ] [Lab 4B: Sharded Key-Value Server]()
     - [ ] Challenge 1: Garbage Collection
     - [ ] Challenge 2: Client Request
