@@ -69,7 +69,7 @@ type KVServer struct {
 
 	keyValData map[string]string // stores the key-value pair
 	appliedMap map[int64]int64   // stores the clientId-commandId pair
-	responseCh map[int64]chan Re // the channel to send response
+	responseCh map[int64]chan Re // stores the requestId-responseCh pair
 
 	logger *zap.SugaredLogger
 }
