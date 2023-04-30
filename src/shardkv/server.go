@@ -1,19 +1,38 @@
 package shardkv
 
+import (
+	"sync"
+	"time"
 
-import "6.824/labrpc"
-import "6.824/raft"
-import "sync"
-import "6.824/labgob"
+	"6.824/labgob"
+	"6.824/labrpc"
+	"6.824/raft"
 
+	"go.uber.org/zap"
+)
 
+const (
+	emptyValue  = ""
+	execTimeOut = 500 * time.Millisecond
+)
 
+// Op structure.
 type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	RequestId int64
+	ClientId  int64
+	CommandId int64
+	Key       string
+	Value     string
+	Method    string
 }
 
+// Re structure.
+type Re struct {
+	Err   Err
+	Value string
+}
+
+// ShardKV structure.
 type ShardKV struct {
 	mu           sync.Mutex
 	me           int
@@ -22,31 +41,20 @@ type ShardKV struct {
 	make_end     func(string) *labrpc.ClientEnd
 	gid          int
 	ctrlers      []*labrpc.ClientEnd
-	maxraftstate int // snapshot if log grows this big
+	maxRaftState int // snapshot if log grows this big
 
-	// Your definitions here.
+	logger *zap.SugaredLogger
 }
 
-
-func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
-}
-
-func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
-}
-
-//
-// the tester calls Kill() when a ShardKV instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
-//
+// Kill sets the server to dead and stops the raft.
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
-	// Your code here, if desired.
 }
 
+// ExecCommand executes command from clerk.
+func (kv *Shard) ExecCommand(request *KVCommandRequest, response *KVCommandResponse) {
+
+}
 
 //
 // servers[] contains the ports of the servers in this group.
@@ -58,8 +66,8 @@ func (kv *ShardKV) Kill() {
 // atomically save the Raft state along with the snapshot.
 //
 // the k/v server should snapshot when Raft's saved state exceeds
-// maxraftstate bytes, in order to allow Raft to garbage-collect its
-// log. if maxraftstate is -1, you don't need to snapshot.
+// maxRaftState bytes, in order to allow Raft to garbage-collect its
+// log. if maxRaftState is -1, you don't need to snapshot.
 //
 // gid is this group's GID, for interacting with the shardctrler.
 //
@@ -76,14 +84,14 @@ func (kv *ShardKV) Kill() {
 // StartServer() must return quickly, so it should start goroutines
 // for any long-running work.
 //
-func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int, gid int, ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *ShardKV {
+func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxRaftState int, gid int, ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *ShardKV {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
 
 	kv := new(ShardKV)
 	kv.me = me
-	kv.maxraftstate = maxraftstate
+	kv.maxRaftState = maxraftstate
 	kv.make_end = make_end
 	kv.gid = gid
 	kv.ctrlers = ctrlers
@@ -95,7 +103,6 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-
 
 	return kv
 }

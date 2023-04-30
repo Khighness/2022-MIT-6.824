@@ -18,27 +18,45 @@ const (
 
 type Err string
 
-// Put or Append
-type PutAppendArgs struct {
-	// You'll have to add definitions here.
-	Key   string
-	Value string
-	Op    string // "Put" or "Append"
-	// You'll have to add definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+const (
+	MethodGet    = "Get"
+	MethodPut    = "Put"
+	MethodAppend = "Append"
+)
+
+// Shard structure.
+type Shard struct {
+	Status int
+	Data   map[string]string
 }
 
-type PutAppendReply struct {
-	Err Err
+// KVCommandRequest structure.
+type KVCommandRequest struct {
+	Key       string
+	Value     string
+	Method    string
+	ClientId  int64
+	CommandId int64
 }
 
-type GetArgs struct {
-	Key string
-	// You'll have to add definitions here.
-}
-
-type GetReply struct {
+// KVCommandResponse structure.
+type KVCommandResponse struct {
 	Err   Err
 	Value string
+}
+
+// PullShardRequest structure.
+type PullShardRequest struct {
+}
+
+// PullShardResponse structure.
+type PullShardResponse struct {
+}
+
+// DeleteShardRequest structure.
+type DeleteShardRequest struct {
+}
+
+// DeleteShardResponse structure.
+type DeleteShardResponse struct {
 }
