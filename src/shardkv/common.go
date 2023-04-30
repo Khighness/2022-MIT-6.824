@@ -45,18 +45,18 @@ type KVCommandResponse struct {
 	Value string
 }
 
-// PullShardRequest structure.
-type PullShardRequest struct {
+// FetchShardRequest structure.
+type FetchShardRequest struct {
 }
 
-// PullShardResponse structure.
-type PullShardResponse struct {
+// FetchShardResponse structure.
+type FetchShardResponse struct {
 }
 
-// DeleteShardRequest structure.
-type DeleteShardRequest struct {
+// CleanShardRequest structure.
+type CleanShardRequest struct {
 }
 
-// DeleteShardResponse structure.
-type DeleteShardResponse struct {
+// CleanShardResponse structure.
+type CleanShardResponse struct {
 }
