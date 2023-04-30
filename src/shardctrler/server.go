@@ -20,18 +20,18 @@ const (
 // Op structure.
 type Op struct {
 	RequestId int64
-	CommandId int64
 	ClientId  int64
+	CommandId int64
 	Args      interface{}
 	Method    string
 }
 
 // NewOp creates a new Op instance.
-func NewOp(commandId, clientId int64, args interface{}, method string) Op {
+func NewOp(clientId, commandId int64, args interface{}, method string) Op {
 	return Op{
 		RequestId: randInt64(),
-		CommandId: commandId,
 		ClientId:  clientId,
+		CommandId: commandId,
 		Args:      args,
 		Method:    method,
 	}
@@ -72,7 +72,7 @@ func (sc *ShardCtrler) Kill() {
 	sc.rf.Kill()
 }
 
-// needed by shardkv tester
+// Raft is needed by shardkv tester.
 func (sc *ShardCtrler) Raft() *raft.Raft {
 	return sc.rf
 }
@@ -96,7 +96,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	}
 	sc.mu.Unlock()
 
-	re := sc.waitCommand(args.CommandId, args.ClientId, *args, MethodQuery)
+	re := sc.waitCommand(args.ClientId, args.CommandId, *args, MethodQuery)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -106,7 +106,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 
 // Join creates a new replication group according to the server map.
 func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
-	re := sc.waitCommand(args.CommandId, args.CommandId, *args, MethodJoin)
+	re := sc.waitCommand(args.ClientId, args.CommandId, *args, MethodJoin)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -115,7 +115,7 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 
 // Leave removes the servers according to the gids.
 func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
-	re := sc.waitCommand(args.CommandId, args.CommandId, *args, MethodLeave)
+	re := sc.waitCommand(args.ClientId, args.CommandId, *args, MethodLeave)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -124,7 +124,7 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 
 // Move moves the server corresponding to the gid to the replication group corresponding to the shard.
 func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
-	re := sc.waitCommand(args.CommandId, args.CommandId, *args, MethodMove)
+	re := sc.waitCommand(args.ClientId, args.CommandId, *args, MethodMove)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -132,8 +132,8 @@ func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 }
 
 // waitCommand waits for command execution to complete and returns re.
-func (sc *ShardCtrler) waitCommand(commandId, clientId int64, args interface{}, method string) (re Re) {
-	op := NewOp(commandId, clientId, args, method)
+func (sc *ShardCtrler) waitCommand(clientId, commandId int64, args interface{}, method string) (re Re) {
+	op := NewOp(clientId, commandId, args, method)
 	_, _, isLeader := sc.rf.Start(op)
 	if !isLeader {
 		re.Err = ErrWrongLeader
