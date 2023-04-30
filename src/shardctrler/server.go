@@ -308,7 +308,6 @@ func StartServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister)
 	sc.id = id
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.stopCh = make(chan struct{})
-	sc.rf = raft.Make(servers, id, persister, sc.applyCh)
 
 	sc.appliedMap = make(map[int64]int64)
 	sc.responseCh = make(map[int64]chan Re)
@@ -317,6 +316,7 @@ func StartServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister)
 	sc.configs[0].Groups = map[int][]string{}
 
 	sc.logger = log.NewZapLogger("ShardCtrler", zap.InfoLevel).Sugar()
+	sc.rf = raft.Make(servers, id, persister, sc.applyCh)
 
 	go sc.handleRaftReady()
 
