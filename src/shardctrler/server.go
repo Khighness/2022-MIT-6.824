@@ -17,22 +17,6 @@ const (
 	execTimeOut = 500 * time.Millisecond
 )
 
-// ShardCtrler structure.
-type ShardCtrler struct {
-	mu      sync.Mutex
-	id      int
-	rf      *raft.Raft
-	applyCh chan raft.ApplyMsg
-	stopCh  chan struct{}
-
-	appliedMap map[int64]int64   // clientId -> last applied commandId
-	responseCh map[int64]chan Re // clientId -> response channel
-
-	configs []Config // indexed by config num
-
-	logger *zap.SugaredLogger
-}
-
 // Op structure.
 type Op struct {
 	RequestId int64
@@ -65,6 +49,22 @@ func NewRe(err Err, config Config) Re {
 		Err:    err,
 		Config: config,
 	}
+}
+
+// ShardCtrler structure.
+type ShardCtrler struct {
+	mu      sync.Mutex
+	id      int
+	rf      *raft.Raft
+	applyCh chan raft.ApplyMsg
+	stopCh  chan struct{}
+
+	appliedMap map[int64]int64   // clientId -> last applied commandId
+	responseCh map[int64]chan Re // clientId -> response channel
+
+	configs []Config // indexed by config num
+
+	logger *zap.SugaredLogger
 }
 
 // Kill sets the server to dead and stops the raft.
