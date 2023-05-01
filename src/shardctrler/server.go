@@ -3,6 +3,7 @@ package shardctrler
 import (
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"6.824/labgob"
@@ -58,6 +59,7 @@ type ShardCtrler struct {
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
 	stopCh  chan struct{}
+	dead    int32
 
 	appliedMap map[int64]int64   // clientId -> last applied commandId
 	responseCh map[int64]chan Re // clientId -> response channel
@@ -69,7 +71,16 @@ type ShardCtrler struct {
 
 // Kill sets the server to dead and stops the raft.
 func (sc *ShardCtrler) Kill() {
+	atomic.StoreInt32(&sc.dead, 1)
 	sc.rf.Kill()
+	close(sc.stopCh)
+	sc.logger.Infof("%s ShardCtrler is stopped", sc.rf)
+}
+
+// killed checks is the server is killed.
+func (sc *ShardCtrler) killed() bool {
+	z := atomic.LoadInt32(&sc.dead)
+	return z == 1
 }
 
 // Raft is needed by shardkv tester.
