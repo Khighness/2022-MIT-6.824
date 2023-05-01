@@ -79,7 +79,7 @@ func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
 	close(kv.stopCh)
-	kv.logger.Infof("%s Server is stopped", kv.rf)
+	kv.logger.Infof("%s KVServer is stopped", kv.rf)
 }
 
 // killed checks is the server is killed.
