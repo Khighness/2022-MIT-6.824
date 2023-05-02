@@ -135,11 +135,11 @@ func (kv *KVServer) ExecCommand(request *KVRequest, response *KVResponse) {
 		return
 	}
 
-	kv.waitCommand(NewOp(*request), response)
+	kv.proposeCommand(NewOp(*request), response)
 }
 
-// waitCommand waits for command execution to complete.
-func (kv *KVServer) waitCommand(op Op, response *KVResponse) {
+// proposeCommand proposes a command to leader and waits for the command execution to complete.
+func (kv *KVServer) proposeCommand(op Op, response *KVResponse) {
 	_, _, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		response.Err = ErrWrongLeader
