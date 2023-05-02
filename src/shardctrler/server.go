@@ -107,7 +107,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	}
 	sc.mu.Unlock()
 
-	re := sc.waitCommand(args.ClientId, args.CommandId, *args, MethodQuery)
+	re := sc.proposeCommand(args.ClientId, args.CommandId, *args, MethodQuery)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -117,7 +117,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 
 // Join creates a new replication group according to the server map.
 func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
-	re := sc.waitCommand(args.ClientId, args.CommandId, *args, MethodJoin)
+	re := sc.proposeCommand(args.ClientId, args.CommandId, *args, MethodJoin)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -126,7 +126,7 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 
 // Leave removes the servers according to the gids.
 func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
-	re := sc.waitCommand(args.ClientId, args.CommandId, *args, MethodLeave)
+	re := sc.proposeCommand(args.ClientId, args.CommandId, *args, MethodLeave)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
@@ -135,15 +135,15 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 
 // Move moves the server corresponding to the gid to the replication group corresponding to the shard.
 func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
-	re := sc.waitCommand(args.ClientId, args.CommandId, *args, MethodMove)
+	re := sc.proposeCommand(args.ClientId, args.CommandId, *args, MethodMove)
 	if re.Err == ErrWrongLeader {
 		reply.WrongLeader = true
 	}
 	reply.Err = re.Err
 }
 
-// waitCommand waits for command execution to complete and returns re.
-func (sc *ShardCtrler) waitCommand(clientId, commandId int64, args interface{}, method string) (re Re) {
+// proposeCommand proposes a command to leader and waits for the command execution to complete.
+func (sc *ShardCtrler) proposeCommand(clientId, commandId int64, args interface{}, method string) (re Re) {
 	op := NewOp(clientId, commandId, args, method)
 	_, _, isLeader := sc.rf.Start(op)
 	if !isLeader {
