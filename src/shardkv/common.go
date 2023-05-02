@@ -1,5 +1,7 @@
 package shardkv
 
+import "6.824/shardctrler"
+
 //
 // Sharded key/value server.
 // Lots of replica groups, each running Raft.
@@ -14,6 +16,9 @@ const (
 	ErrNoKey       = "ErrNoKey"
 	ErrWrongGroup  = "ErrWrongGroup"
 	ErrWrongLeader = "ErrWrongLeader"
+	ErrServer      = "ErrServer"
+	ErrTimeout     = "ErrTimeout"
+	ErrConfig      = "ErrConfig"
 )
 
 type Err string
@@ -32,6 +37,11 @@ const (
 	StatusPush
 	StatusCollection
 )
+
+// Configuration structure.
+type Configuration struct {
+	Config shardctrler.Config
+}
 
 // Shard structure.
 type Shard struct {
@@ -86,17 +96,17 @@ type FetchShardRequest struct {
 
 // FetchShardResponse structure.
 type FetchShardResponse struct {
-	Err    Err
-	Num    int
-	State  map[int]Shard
-	Client map[int64]int
+	Err        Err
+	Num        int
+	State      map[int]Shard
+	AppliedMap map[int64]int64
 }
 
 // FetchShard structure.
 type FetchShard struct {
-	Num    int
-	State  map[int]Shard
-	Client map[int64]int
+	Num        int
+	State      map[int]Shard
+	AppliedMap map[int64]int64
 }
 
 // CleanShardRequest structure.
@@ -112,6 +122,6 @@ type CleanShardResponse struct {
 
 // CleanShard structure.
 type CleanShard struct {
-	ShardList []int
 	Num       int
+	ShardList []int
 }
