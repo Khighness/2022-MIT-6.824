@@ -146,37 +146,34 @@ func (kv *KVServer) proposeCommand(op Op, response *KVResponse) {
 		return
 	}
 
-	kv.mu.Lock()
-	responseCh := make(chan Re, 1)
-	kv.responseCh[op.RequestId] = responseCh
-	kv.mu.Unlock()
+	responseCh := kv.createResponseCh(op.RequestId)
+	defer kv.removeResponseCh(op.RequestId)
 
-	timer := time.NewTimer(execTimeOut)
 	select {
 	case <-kv.stopCh:
 		response.Err = ErrServerStopped
-	case <-timer.C:
+	case <-time.After(execTimeOut):
 		response.Err = ErrExecTimeout
 	case re := <-responseCh:
 		response.Err = re.Err
 		response.Value = re.Value
 	}
-
-	kv.removeResponseCh(op.RequestId)
 }
 
-// sendResponse sends response.
-func (kv *KVServer) sendResponse(requestId int64, err Err, value string) {
-	if ch, ok := kv.responseCh[requestId]; ok {
-		ch <- NewRe(err, value)
-	}
+// createResponseCh creates a response channel according to the request Id.
+func (kv *KVServer) createResponseCh(requestId int64) chan Re {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	responseCh := make(chan Re, 1)
+	kv.responseCh[requestId] = responseCh
+	return responseCh
 }
 
 // removeNotifyReCh removes the response channel according to the request id.
-func (kv *KVServer) removeResponseCh(reqId int64) {
+func (kv *KVServer) removeResponseCh(requestId int64) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	delete(kv.responseCh, reqId)
+	delete(kv.responseCh, requestId)
 }
 
 // handleRaftReady handles the applied messages from Raft.
@@ -252,6 +249,13 @@ func (kv *KVServer) handlePutOrAppendOp(op Op) {
 	kv.sendResponse(op.RequestId, OK, emptyValue)
 }
 
+// sendResponse sends response.
+func (kv *KVServer) sendResponse(requestId int64, err Err, value string) {
+	if ch, ok := kv.responseCh[requestId]; ok {
+		ch <- NewRe(err, value)
+	}
+}
+
 // StartKVServer starts a KVServer.
 func StartKVServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister, maxRaftState int) *KVServer {
 	labgob.Register(Op{})
@@ -269,7 +273,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persiste
 	kv.responseCh = make(map[int64]chan Re)
 
 	kv.readPersist(true, 0, 0, kv.persister.ReadSnapshot())
-	kv.logger = log.NewZapLogger("KVServer", zap.WarnLevel).Sugar()
+	kv.logger = log.NewZapLogger("KVServer", zap.DebugLevel).Sugar()
 	kv.rf = raft.Make(servers, id, persister, kv.applyCh)
 
 	go kv.handleRaftReady()
