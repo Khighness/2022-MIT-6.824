@@ -19,42 +19,23 @@ const (
 	execTimeOut = 500 * time.Millisecond
 )
 
-// UniqueId structure.
-type UniqueId struct {
-	CommandId int64
-}
-
-// Op structure.
-type Op struct {
-	RequestId int64
-	ClientId  int64
-	CommandId int64
-	Key       string
-	Value     string
-	Method    string
-}
-
-// Re structure.
-type Re struct {
-	Err   Err
-	Value string
-}
-
 // ShardKV structure.
 type ShardKV struct {
-	mu           sync.Mutex
-	me           int
-	rf           *raft.Raft
-	dead         int32
-	applyCh      chan raft.ApplyMsg
-	stopCh       chan struct{}
-	makeEnd      func(string) *labrpc.ClientEnd
-	gid          int
-	ctrlers      []*labrpc.ClientEnd
+	mu      sync.Mutex
+	id      int
+	rf      *raft.Raft
+	dead    int32
+	applyCh chan raft.ApplyMsg
+	stopCh  chan struct{}
+
 	maxRaftState int // snapshot if log grows this big
 	persister    *raft.Persister
 
-	clerk      *shardctrler.Clerk
+	makeEnd func(string) *labrpc.ClientEnd
+	gid     int
+	ctrlers []*labrpc.ClientEnd
+	clerk   *shardctrler.Clerk
+
 	state      [shardctrler.NShards]Shard
 	appliedMap map[int64]int64
 	responseCh map[int64]chan Re
@@ -182,8 +163,10 @@ func (kv *ShardKV) ClearShard(request CleanShardRequest, response *CleanShardRes
 	command := CleanShard{
 		Num:       request.Num,
 		ShardList: request.ShardList,
+		Command:   NewCommand(),
 	}
-
+	re := kv.proposeCommand(command)
+	response.Err = re.Err
 }
 
 // ExecKVCommand executes KV command.
@@ -203,46 +186,37 @@ func (kv *ShardKV) ExecKVCommand(request *KVCommandRequest, response *KVCommandR
 		return
 	}
 
-	op := Op{
-		RequestId: randInt64(),
+	command := Op{
 		ClientId:  request.ClientId,
 		CommandId: request.CommandId,
 		Key:       request.Key,
 		Value:     request.Value,
 		Method:    request.Method,
+		Command:   NewCommand(),
 	}
-	kv.proposeCommand(op, response)
+	re := kv.proposeCommand(command)
+	response.Err = re.Err
+	response.Value = re.Value.(string)
 }
 
 // proposeCommand proposes a command to leader and waits for the command execution to complete.
-func (kv *ShardKV) proposeCommand(op Op, response *KVCommandResponse) {
-	if _, _, isLeader := kv.rf.Start(op); !isLeader {
-		response.Err = ErrWrongLeader
+func (kv *ShardKV) proposeCommand(cmd UniqueId) (re Re) {
+	if _, _, isLeader := kv.rf.Start(cmd); !isLeader {
+		re.Err = ErrWrongLeader
 		return
 	}
 
-	responseCh := kv.createResponseCh(op.RequestId)
-	defer kv.removeResponseCh(op.RequestId)
+	responseCh := kv.createResponseCh(cmd.ID())
+	defer kv.removeResponseCh(cmd.ID())
 
 	select {
 	case <-kv.stopCh:
-		response.Err = ErrServer
+		re.Err = ErrServer
 	case <-time.After(execTimeOut):
-		response.Err = ErrTimeout
-	case re := <-responseCh:
-		response.Err = re.Err
-		response.Value = re.Value
+		re.Err = ErrTimeout
+	case re = <-responseCh:
 	}
-}
-
-// sendResponse sends response.
-func (kv *ShardKV) sendResponse(requestId int64, err Err, value string) {
-	if ch, ok := kv.responseCh[requestId]; ok {
-		ch <- Re{
-			Err:   err,
-			Value: value,
-		}
-	}
+	return
 }
 
 // createResponseCh creates a response channel according to the request Id.
@@ -261,10 +235,20 @@ func (kv *ShardKV) removeResponseCh(requestId int64) {
 	delete(kv.responseCh, requestId)
 }
 
+// sendResponse sends response.
+func (kv *ShardKV) sendResponse(requestId int64, err Err, value string) {
+	if ch, ok := kv.responseCh[requestId]; ok {
+		ch <- Re{
+			Err:   err,
+			Value: value,
+		}
+	}
+}
+
 //
 // servers[] contains the ports of the servers in this group.
 //
-// me is the index of the current server in servers[].
+// id is the index of the current server in servers[].
 //
 // the k/v server should store snapshots through the underlying Raft
 // implementation, which should call persister.SaveStateAndSnapshot() to
@@ -289,28 +273,38 @@ func (kv *ShardKV) removeResponseCh(requestId int64) {
 // StartServer() must return quickly, so it should start goroutines
 // for any long-running work.
 //
-func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxRaftState int, gid int, ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *ShardKV {
+func StartServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister, maxRaftState int, gid int, ctrlers []*labrpc.ClientEnd, makeEnd func(string) *labrpc.ClientEnd) *ShardKV {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
-	labgob.Register(Re{})
 	labgob.Register(FetchShard{})
 	labgob.Register(CleanShard{})
+	labgob.Register(Re{})
 
 	kv := new(ShardKV)
-	kv.me = me
+	kv.id = id
+	kv.applyCh = make(chan raft.ApplyMsg)
+	kv.stopCh = make(chan struct{})
+
 	kv.maxRaftState = maxRaftState
-	kv.makeEnd = make_end
+	kv.persister = persister
+
+	kv.makeEnd = makeEnd
 	kv.gid = gid
 	kv.ctrlers = ctrlers
+	kv.clerk = shardctrler.MakeClerk(kv.ctrlers)
 
-	// Your initialization code here.
+	kv.appliedMap = make(map[int64]int64)
+	kv.responseCh = make(map[int64]chan Re)
+	for idx := range kv.state {
+		kv.state[id] = Shard{
+			Status: StatusDefault,
+			Data:   make(map[string]string),
+		}
+	}
 
-	// Use something like this to talk to the shardctrler:
-	// kv.mck = shardctrler.MakeClerk(kv.ctrlers)
-
-	kv.applyCh = make(chan raft.ApplyMsg)
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+	kv.readPersist(kv.persister.ReadSnapshot())
+	kv.rf = raft.Make(servers, id, persister, kv.applyCh)
 
 	return kv
 }

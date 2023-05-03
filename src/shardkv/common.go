@@ -102,13 +102,6 @@ type FetchShardResponse struct {
 	AppliedMap map[int64]int64
 }
 
-// FetchShard structure.
-type FetchShard struct {
-	Num        int
-	State      map[int]Shard
-	AppliedMap map[int64]int64
-}
-
 // CleanShardRequest structure.
 type CleanShardRequest struct {
 	Num       int
@@ -120,8 +113,53 @@ type CleanShardResponse struct {
 	Err Err
 }
 
+// UniqueId interface.
+type UniqueId interface {
+	ID() int64
+}
+
+// Command structure.
+type Command struct {
+	RequestId int64
+}
+
+// ID implements UniqueId.
+func (c Command) ID() int64 {
+	return c.RequestId
+}
+
+// NewCommand creates a command instance.
+func NewCommand() Command {
+	return Command{RequestId: randInt64()}
+}
+
+// Op structure.
+type Op struct {
+	ClientId  int64
+	CommandId int64
+	Key       string
+	Value     string
+	Method    string
+	Command
+}
+
+// FetchShard structure.
+type FetchShard struct {
+	Num        int
+	State      map[int]Shard
+	AppliedMap map[int64]int64
+	Command
+}
+
 // CleanShard structure.
 type CleanShard struct {
 	Num       int
 	ShardList []int
+	Command
+}
+
+// Re structure.
+type Re struct {
+	Err   Err
+	Value interface{}
 }
