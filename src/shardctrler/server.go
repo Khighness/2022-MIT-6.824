@@ -154,36 +154,34 @@ func (sc *ShardCtrler) proposeCommand(clientId, commandId int64, args interface{
 	sc.logger.Infof("%s Request method: %s, args: %+v", sc.rf, method, args)
 	defer sc.logger.Infof("%s Response: %+v", sc.rf, re)
 
-	sc.mu.Lock()
-	responseCh := make(chan Re, 1)
-	sc.responseCh[op.RequestId] = responseCh
-	sc.mu.Unlock()
+	responseCh := sc.createResponseCh(op.RequestId)
+	defer sc.removeResponseCh(op.RequestId)
 
-	timer := time.NewTimer(execTimeOut)
 	select {
 	case <-sc.stopCh:
 		re.Err = ErrServer
-	case <-timer.C:
+	case <-time.After(execTimeOut):
 		re.Err = ErrTimeout
 	case re = <-responseCh:
 	}
 
-	sc.removeResponseCh(op.RequestId)
 	return
 }
 
-// sendResponse sends response.
-func (sc *ShardCtrler) sendResponse(requestId int64, err Err, config Config) {
-	if ch, ok := sc.responseCh[requestId]; ok {
-		ch <- NewRe(err, config)
-	}
+// createResponseCh creates a response channel according to the request Id.
+func (kv *ShardCtrler) createResponseCh(requestId int64) chan Re {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	responseCh := make(chan Re, 1)
+	kv.responseCh[requestId] = responseCh
+	return responseCh
 }
 
 // removeNotifyReCh removes the response channel according to the request id.
-func (sc *ShardCtrler) removeResponseCh(reqId int64) {
+func (sc *ShardCtrler) removeResponseCh(requestId int64) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
-	delete(sc.responseCh, reqId)
+	delete(sc.responseCh, requestId)
 }
 
 // handleRaftReady handles the applied messages from Raft.
@@ -308,6 +306,13 @@ func (sc *ShardCtrler) adjustConfig(config *Config) {
 		for shard := range config.Shards {
 			config.Shards[shard] = gids[shard%total]
 		}
+	}
+}
+
+// sendResponse sends response.
+func (sc *ShardCtrler) sendResponse(requestId int64, err Err, config Config) {
+	if ch, ok := sc.responseCh[requestId]; ok {
+		ch <- NewRe(err, config)
 	}
 }
 
