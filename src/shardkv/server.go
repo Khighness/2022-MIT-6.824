@@ -38,7 +38,7 @@ type ShardKV struct {
 
 	state      [shardctrler.NShards]Shard
 	appliedMap map[int64]int64
-	responseCh map[int64]chan Re
+	responseCh map[int64]chan Result
 	config     shardctrler.Config
 	lastConfig shardctrler.Config
 
@@ -186,7 +186,7 @@ func (kv *ShardKV) ExecKVCommand(request *KVCommandRequest, response *KVCommandR
 		return
 	}
 
-	command := Op{
+	command := Operation{
 		ClientId:  request.ClientId,
 		CommandId: request.CommandId,
 		Key:       request.Key,
@@ -200,7 +200,7 @@ func (kv *ShardKV) ExecKVCommand(request *KVCommandRequest, response *KVCommandR
 }
 
 // proposeCommand proposes a command to leader and waits for the command execution to complete.
-func (kv *ShardKV) proposeCommand(cmd UniqueId) (re Re) {
+func (kv *ShardKV) proposeCommand(cmd UniqueId) (re Result) {
 	if _, _, isLeader := kv.rf.Start(cmd); !isLeader {
 		re.Err = ErrWrongLeader
 		return
@@ -220,10 +220,10 @@ func (kv *ShardKV) proposeCommand(cmd UniqueId) (re Re) {
 }
 
 // createResponseCh creates a response channel according to the request Id.
-func (kv *ShardKV) createResponseCh(requestId int64) chan Re {
+func (kv *ShardKV) createResponseCh(requestId int64) chan Result {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	responseCh := make(chan Re, 1)
+	responseCh := make(chan Result, 1)
 	kv.responseCh[requestId] = responseCh
 	return responseCh
 }
@@ -236,13 +236,97 @@ func (kv *ShardKV) removeResponseCh(requestId int64) {
 }
 
 // sendResponse sends response.
-func (kv *ShardKV) sendResponse(requestId int64, err Err, value string) {
+func (kv *ShardKV) sendResponse(requestId int64, err Err, value interface{}) {
 	if ch, ok := kv.responseCh[requestId]; ok {
-		ch <- Re{
+		ch <- Result{
 			Err:   err,
 			Value: value,
 		}
 	}
+}
+
+// handleRaftReady handles the applied messages from Raft.
+func (kv *ShardKV) handleRaftReady() {
+	for {
+		select {
+		case <-kv.stopCh:
+			return
+		case applyMsg := <-kv.applyCh:
+			kv.mu.Lock()
+
+			if applyMsg.SnapshotValid {
+				kv.applySnapshot(applyMsg)
+			} else if applyMsg.CommandValid {
+				kv.applyCommand(applyMsg)
+			}
+
+			kv.mu.Unlock()
+		}
+	}
+}
+
+// applySnapshot applies the snapshot.
+func (kv *ShardKV) applySnapshot(applyMsg raft.ApplyMsg) {
+	if kv.rf.CondInstallSnapshot(applyMsg.SnapshotTerm, applyMsg.SnapshotIndex, applyMsg.Snapshot) {
+		kv.readPersist(applyMsg.Snapshot)
+	}
+}
+
+// applyCommand applies the command.
+func (kv *ShardKV) applyCommand(applyMsg raft.ApplyMsg) {
+	if command, ok := applyMsg.Command.(Operation); ok {
+		kv.doApplyOperation(command)
+	}
+	if command, ok := applyMsg.Command.(Configuration); ok {
+		kv.doApplyConfiguration(command)
+	}
+	if command, ok := applyMsg.Command.(FetchShard); ok {
+		kv.doApplyFetchShard(command)
+	}
+	if command, ok := applyMsg.Command.(CleanShard); ok {
+		kv.doApplyClearShard(command)
+	}
+
+	cmd := applyMsg.Command.(UniqueId)
+	kv.sendResponse(cmd.ID(), OK, applyMsg.Command)
+	kv.maybeSaveSnapshot(applyMsg.SnapshotIndex)
+}
+
+// doApplyOperation does applying the KV operation.
+func (kv *ShardKV) doApplyOperation(command Operation) {
+	// Prevent stale read.
+	shard := key2shard(command.Key)
+	if kv.isStableShard(shard) {
+		return
+	}
+
+	// Ensure idempotence.
+	if lastCommandId, ok := kv.appliedMap[command.ClientId]; ok && lastCommandId == command.CommandId {
+		return
+	}
+
+	switch command.Method {
+	case MethodPut:
+		kv.state[shard].Put(command.Key, command.Value)
+	case MethodAppend:
+		kv.state[shard].Append(command.Key, command.Value)
+	}
+	kv.appliedMap[command.ClientId] = command.CommandId
+}
+
+// doApplyConfiguration does applying the last configuration.
+func (kv *ShardKV) doApplyConfiguration(command Configuration) {
+
+}
+
+// doApplyFetchShard does applying the shard.
+func (kv *ShardKV) doApplyFetchShard(command FetchShard) {
+
+}
+
+// doApplyClearShard does clearing the shard.
+func (kv *ShardKV) doApplyClearShard(command CleanShard) {
+
 }
 
 //
@@ -276,10 +360,10 @@ func (kv *ShardKV) sendResponse(requestId int64, err Err, value string) {
 func StartServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister, maxRaftState int, gid int, ctrlers []*labrpc.ClientEnd, makeEnd func(string) *labrpc.ClientEnd) *ShardKV {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
-	labgob.Register(Op{})
+	labgob.Register(Operation{})
 	labgob.Register(FetchShard{})
 	labgob.Register(CleanShard{})
-	labgob.Register(Re{})
+	labgob.Register(Result{})
 
 	kv := new(ShardKV)
 	kv.id = id
@@ -295,9 +379,9 @@ func StartServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister,
 	kv.clerk = shardctrler.MakeClerk(kv.ctrlers)
 
 	kv.appliedMap = make(map[int64]int64)
-	kv.responseCh = make(map[int64]chan Re)
+	kv.responseCh = make(map[int64]chan Result)
 	for idx := range kv.state {
-		kv.state[id] = Shard{
+		kv.state[idx] = Shard{
 			Status: StatusDefault,
 			Data:   make(map[string]string),
 		}

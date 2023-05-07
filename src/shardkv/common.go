@@ -38,11 +38,6 @@ const (
 	StatusCollection
 )
 
-// Configuration structure.
-type Configuration struct {
-	Config shardctrler.Config
-}
-
 // Shard structure.
 type Shard struct {
 	Status int
@@ -133,14 +128,19 @@ func NewCommand() Command {
 	return Command{RequestId: randInt64()}
 }
 
-// Op structure.
-type Op struct {
+// Operation structure.
+type Operation struct {
 	ClientId  int64
 	CommandId int64
 	Key       string
 	Value     string
 	Method    string
 	Command
+}
+
+// Configuration structure.
+type Configuration struct {
+	Config shardctrler.Config
 }
 
 // FetchShard structure.
@@ -158,8 +158,8 @@ type CleanShard struct {
 	Command
 }
 
-// Re structure.
-type Re struct {
+// Result structure.
+type Result struct {
 	Err   Err
 	Value interface{}
 }
