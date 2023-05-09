@@ -29,10 +29,11 @@ func randInt64() int64 {
 
 // Clerk (client) structure.
 type Clerk struct {
-	sm       *shardctrler.Clerk
-	config   shardctrler.Config
-	makeEnd  func(string) *labrpc.ClientEnd
-	clientId int64
+	sm        *shardctrler.Clerk
+	config    shardctrler.Config
+	makeEnd   func(string) *labrpc.ClientEnd
+	clientId  int64
+	commandId int64
 }
 
 // MakeClerk creates a clerk.
@@ -41,6 +42,7 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.sm = shardctrler.MakeClerk(ctrlers)
 	ck.makeEnd = make_end
 	ck.clientId = randInt64()
+	ck.commandId = 1
 	return ck
 }
 
@@ -93,6 +95,7 @@ func (ck *Clerk) sendRequest(request KVCommandRequest) KVCommandResponse {
 				var response KVCommandResponse
 				ok := srv.Call("ShardKV.ExecKVCommand", &request, &response)
 				if ok && (response.Err == OK || response.Err == ErrNoKey) {
+					ck.commandId += 1
 					return response
 				}
 				if ok && (response.Err == ErrWrongGroup) {
