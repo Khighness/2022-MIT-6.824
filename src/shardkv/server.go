@@ -53,7 +53,7 @@ func (kv *ShardKV) Kill() {
 	kv.logger.Infof("%s ShardKV Server is stopped", kv.rf)
 }
 
-// killed checks is the server is killed.
+// killed checks if the server is killed.
 func (kv *ShardKV) killed() bool {
 	z := atomic.LoadInt32(&kv.dead)
 	return z == 1
@@ -301,7 +301,7 @@ func (kv *ShardKV) doApplyOperation(command Operation) {
 	}
 
 	// Ensure idempotence.
-	if lastCommandId, ok := kv.appliedMap[command.ClientId]; ok && lastCommandId == command.CommandId {
+	if lastCommandId, ok := kv.appliedMap[command.ClientId]; ok && lastCommandId <= command.CommandId {
 		return
 	}
 
@@ -316,17 +316,63 @@ func (kv *ShardKV) doApplyOperation(command Operation) {
 
 // doApplyConfiguration does applying the last configuration.
 func (kv *ShardKV) doApplyConfiguration(command Configuration) {
+	nextConfig := command.Config
+	nextNum := nextConfig.Num
+	if nextNum != kv.config.Num+1 {
+		return
+	}
 
+	for shard, targetGid := range nextConfig.Shards {
+		originGid := kv.config.Shards[shard]
+		if targetGid == kv.gid && targetGid != kv.gid && originGid != 0 {
+			kv.state[shard].Status = StatusPull
+		}
+		if targetGid != kv.gid && originGid == kv.gid && targetGid != 0 {
+			kv.state[shard].Status = StatusPush
+		}
+	}
+
+	kv.lastConfig = kv.config
+	kv.config = nextConfig
 }
 
 // doApplyFetchShard does applying the shard.
 func (kv *ShardKV) doApplyFetchShard(command FetchShard) {
+	if command.Num != kv.config.Num {
+		return
+	}
 
+	for shard := range command.State {
+		for k, v := range command.State[shard].Data {
+			kv.state[shard].Put(k, v)
+		}
+	}
+
+	for clientId, commandId := range command.AppliedMap {
+		if kv.appliedMap[clientId] < commandId {
+			kv.appliedMap[clientId] = commandId
+		}
+	}
 }
 
 // doApplyClearShard does clearing the shard.
 func (kv *ShardKV) doApplyClearShard(command CleanShard) {
+	if command.Num != kv.config.Num {
+		return
+	}
 
+	for _, shard := range command.ShardList {
+		if kv.state[shard].Status == StatusCollection {
+			kv.state[shard].Status = StatusDefault
+		}
+
+		if kv.state[shard].Status == StatusPush {
+			kv.state[shard] = Shard{
+				Status: StatusDefault,
+				Data:   make(map[string]string),
+			}
+		}
+	}
 }
 
 //
