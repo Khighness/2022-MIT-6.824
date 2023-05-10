@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	execTimeOut = 500 * time.Millisecond
+	execTimeout = 500 * time.Millisecond
 )
 
 // Op structure.
@@ -160,7 +160,7 @@ func (sc *ShardCtrler) proposeCommand(clientId, commandId int64, args interface{
 	select {
 	case <-sc.stopCh:
 		re.Err = ErrServer
-	case <-time.After(execTimeOut):
+	case <-time.After(execTimeout):
 		re.Err = ErrTimeout
 	case re = <-responseCh:
 	}
