@@ -407,6 +407,16 @@ func (kv *ShardKV) handlePullingShards() {
 	}
 }
 
+// sendFetchShard fetches shard data from the origin peer when the shard needs to be migrated.
+func (kv *ShardKV) sendFetchShard(wg *sync.WaitGroup, gid int, shards []int) {
+
+}
+
+// sendFetchShard calls the origin peer to clear the shard data after the shard migration finishes.
+func (kv *ShardKV) sendClearShard(wg *sync.WaitGroup, gid int, shards []int) {
+
+}
+
 // handleMigratedShards handles the migrated shards.
 func (kv *ShardKV) handleMigratedShards() {
 	for !kv.killed() {
