@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	emptyValue  = ""
-	execTimeOut = 500 * time.Millisecond
+	emptyValue        = ""
+	consensusTimeout  = 500 * time.Millisecond
+	scanShardInternal = 50 * time.Millisecond
 )
 
 // ShardKV structure.
@@ -64,7 +65,7 @@ func (kv *ShardKV) isStableShard(shard int) bool {
 	if kv.config.Shards[shard] != kv.gid {
 		return true
 	}
-	if kv.state[shard].Status == StatusPull || kv.state[shard].Status == StatusPush {
+	if kv.state[shard].Status == StatusPulling || kv.state[shard].Status == StatusPushing {
 		return true
 	}
 	return false
@@ -212,7 +213,7 @@ func (kv *ShardKV) proposeCommand(cmd UniqueId) (re Result) {
 	select {
 	case <-kv.stopCh:
 		re.Err = ErrServer
-	case <-time.After(execTimeOut):
+	case <-time.After(consensusTimeout):
 		re.Err = ErrTimeout
 	case re = <-responseCh:
 	}
@@ -325,10 +326,10 @@ func (kv *ShardKV) doApplyConfiguration(command Configuration) {
 	for shard, targetGid := range nextConfig.Shards {
 		originGid := kv.config.Shards[shard]
 		if targetGid == kv.gid && targetGid != kv.gid && originGid != 0 {
-			kv.state[shard].Status = StatusPull
+			kv.state[shard].Status = StatusPulling
 		}
 		if targetGid != kv.gid && originGid == kv.gid && targetGid != 0 {
-			kv.state[shard].Status = StatusPush
+			kv.state[shard].Status = StatusPushing
 		}
 	}
 
@@ -343,8 +344,11 @@ func (kv *ShardKV) doApplyFetchShard(command FetchShard) {
 	}
 
 	for shard := range command.State {
-		for k, v := range command.State[shard].Data {
-			kv.state[shard].Put(k, v)
+		if kv.state[shard].Status == StatusPulling {
+			for k, v := range command.State[shard].Data {
+				kv.state[shard].Put(k, v)
+			}
+			kv.state[shard].Status = StatusMigrated
 		}
 	}
 
@@ -362,16 +366,72 @@ func (kv *ShardKV) doApplyClearShard(command CleanShard) {
 	}
 
 	for _, shard := range command.ShardList {
-		if kv.state[shard].Status == StatusCollection {
+		if kv.state[shard].Status == StatusMigrated {
 			kv.state[shard].Status = StatusDefault
 		}
 
-		if kv.state[shard].Status == StatusPush {
+		if kv.state[shard].Status == StatusPushing {
 			kv.state[shard] = Shard{
 				Status: StatusDefault,
 				Data:   make(map[string]string),
 			}
 		}
+	}
+}
+
+// handlePullingShards handles the pulling shards.
+func (kv *ShardKV) handlePullingShards() {
+	for !kv.killed() {
+		if _, isLeader := kv.rf.GetState(); !isLeader {
+			continue
+		}
+
+		gidShards := make(map[int][]int)
+		kv.mu.Lock()
+		for shard := range kv.state {
+			if kv.state[shard].Status == StatusPulling {
+				originGid := kv.lastConfig.Shards[shard]
+				gidShards[originGid] = append(gidShards[originGid], shard)
+			}
+		}
+		kv.mu.Unlock()
+
+		var wg sync.WaitGroup
+		for gid, shards := range gidShards {
+			wg.Add(1)
+			// TODO(Khighness): send rpc
+		}
+		wg.Wait()
+
+		time.Sleep(scanShardInternal)
+	}
+}
+
+// handleMigratedShards handles the migrated shards.
+func (kv *ShardKV) handleMigratedShards() {
+	for !kv.killed() {
+		if _, isLeader := kv.rf.GetState(); !isLeader {
+			continue
+		}
+
+		gidShards := make(map[int][]int)
+		kv.mu.Lock()
+		for shard := range kv.state {
+			if kv.state[shard].Status == StatusMigrated {
+				originGid := kv.lastConfig.Shards[shard]
+				gidShards[originGid] = append(gidShards[originGid], shard)
+			}
+		}
+		kv.mu.Unlock()
+
+		var wg sync.WaitGroup
+		for gid, shards := range gidShards {
+			wg.Add(1)
+			// TODO(Khighness): send rpc
+		}
+		wg.Wait()
+
+		time.Sleep(scanShardInternal)
 	}
 }
 

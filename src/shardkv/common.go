@@ -29,13 +29,18 @@ const (
 	MethodAppend = "Append"
 )
 
+// Status represents the status of Shard.
 type Status int
 
 const (
+	// StatusDefault represents the shard can be accessed.
 	StatusDefault = iota
-	StatusPull
-	StatusPush
-	StatusCollection
+	// StatusPulling represents the shard is pulling for data from other peers.
+	StatusPulling
+	// StatusPushing represents the shard is pushing data to the target peer.
+	StatusPushing
+	// StatusMigrated represents the shard is migrated to the target peer.
+	StatusMigrated
 )
 
 // Shard structure.
