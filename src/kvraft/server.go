@@ -16,7 +16,7 @@ import (
 
 const (
 	emptyValue  = ""
-	execTimeOut = 500 * time.Millisecond
+	execTimeout = 500 * time.Millisecond
 )
 
 // Op structure.
@@ -152,7 +152,7 @@ func (kv *KVServer) proposeCommand(op Op, response *KVResponse) {
 	select {
 	case <-kv.stopCh:
 		response.Err = ErrServerStopped
-	case <-time.After(execTimeOut):
+	case <-time.After(execTimeout):
 		response.Err = ErrExecTimeout
 	case re := <-responseCh:
 		response.Err = re.Err
