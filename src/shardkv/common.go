@@ -1,6 +1,9 @@
 package shardkv
 
-import "6.824/shardctrler"
+import (
+	"6.824/labgob"
+	"6.824/shardctrler"
+)
 
 //
 // Sharded key/value server.
@@ -35,13 +38,23 @@ type Status int
 const (
 	// StatusDefault represents the shard can be accessed.
 	StatusDefault = iota
-	// StatusPulling represents the shard is pulling for data from other peers.
+	// StatusPulling represents the server that currently
+	// owns the shard is pulling for data from origin server.
 	StatusPulling
-	// StatusPushing represents the shard is pushing data to the target peer.
+	// StatusPushing represents the origin server that lastly
+	// owns shard is pushing data to the target server.
 	StatusPushing
-	// StatusMigrated represents the shard is migrated to the target peer.
+	// StatusMigrated represents the shard is migrated to
+	// the target server.
 	StatusMigrated
 )
+
+func init() {
+	labgob.Register(Operation{})
+	labgob.Register(Configuration{})
+	labgob.Register(FetchShard{})
+	labgob.Register(CleanShard{})
+}
 
 // Shard structure.
 type Shard struct {
@@ -146,6 +159,7 @@ type Operation struct {
 // Configuration structure.
 type Configuration struct {
 	Config shardctrler.Config
+	Command
 }
 
 // FetchShard structure.

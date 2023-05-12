@@ -52,7 +52,7 @@ func (ck *Clerk) Get(key string) string {
 		Key:       key,
 		Method:    MethodGet,
 		ClientId:  ck.clientId,
-		CommandId: randInt64(),
+		CommandId: ck.commandId,
 	}
 
 	response := ck.sendRequest(request)
@@ -67,7 +67,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		Value:     value,
 		Method:    op,
 		ClientId:  ck.clientId,
-		CommandId: randInt64(),
+		CommandId: ck.commandId,
 	}
 
 	_ = ck.sendRequest(request)
