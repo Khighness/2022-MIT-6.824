@@ -331,7 +331,7 @@ func StartServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister)
 	sc.configs = make([]Config, 1)
 	sc.configs[0].Groups = map[int][]string{}
 
-	sc.logger = log.NewZapLogger("ShardCtrler", zap.InfoLevel).Sugar()
+	sc.logger = log.NewZapLogger("ShardCtrler", zap.PanicLevel).Sugar()
 	sc.rf = raft.Make(servers, id, persister, sc.applyCh)
 
 	go sc.handleRaftReady()
