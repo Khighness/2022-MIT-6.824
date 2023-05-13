@@ -1,48 +1,45 @@
 package shardkv
 
 import (
+	"6.824/log"
 	"bytes"
 	"fmt"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"6.824/labgob"
 	"6.824/labrpc"
-	"6.824/log"
 	"6.824/raft"
 	"6.824/shardctrler"
-
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 const (
-	consensusTimeout   = 500 * time.Millisecond
+	heartbeatInternal  = 500 * time.Millisecond
 	pullConfigInternal = 100 * time.Millisecond
 	scanShardInternal  = 50 * time.Millisecond
+	consensusTimeout   = 500 * time.Millisecond
 )
 
 // ShardKV structure.
 type ShardKV struct {
-	mu      sync.Mutex
-	id      int
-	rf      *raft.Raft
-	dead    int32
-	applyCh chan raft.ApplyMsg
-	stopCh  chan struct{}
-
-	maxRaftState int // snapshot if log grows this big
+	mu           sync.RWMutex
+	id           int
+	gid          int
+	rf           *raft.Raft
+	dead         int32
 	persister    *raft.Persister
+	maxRaftState int
+	applyCh      chan raft.ApplyMsg
+	makeEnd      func(string) *labrpc.ClientEnd
 
-	makeEnd func(string) *labrpc.ClientEnd
-	gid     int
-	ctrlers []*labrpc.ClientEnd
-	clerk   *shardctrler.Clerk
-
+	ctrlers    []*labrpc.ClientEnd
+	clerk      *shardctrler.Clerk
 	state      [shardctrler.NShards]Shard
 	appliedMap map[int64]int64
-	responseCh map[int64]chan Result
+	responseCh map[int]chan interface{}
 	config     shardctrler.Config
 	lastConfig shardctrler.Config
 
@@ -58,8 +55,6 @@ func (kv *ShardKV) String() string {
 func (kv *ShardKV) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
-	close(kv.stopCh)
-	kv.logger.Infof("%s ShardKV Server is stopped", kv)
 }
 
 // killed checks if the server is killed.
@@ -68,8 +63,8 @@ func (kv *ShardKV) killed() bool {
 	return z == 1
 }
 
-// isStableShard checks if the shard is stale.
-func (kv *ShardKV) isStableShard(shard int) bool {
+// isStaleShard checks if the shard is stale.
+func (kv *ShardKV) isStaleShard(shard int) bool {
 	if kv.config.Shards[shard] != kv.gid {
 		return true
 	}
@@ -97,7 +92,8 @@ func (kv *ShardKV) readPersist(snapshot []byte) {
 
 	if decoder.Decode(&state) != nil || decoder.Decode(&appliedMap) != nil ||
 		decoder.Decode(&config) != nil || decoder.Decode(&lastConfig) != nil {
-		kv.logger.Panic("%s Failed to decode server state from persistent snapshot", kv.rf)
+		kv.logger.Infof("%s Failed to decode server state from persistent snapshot", kv)
+		panic("err")
 	}
 	kv.state = state
 	kv.appliedMap = appliedMap
@@ -106,7 +102,7 @@ func (kv *ShardKV) readPersist(snapshot []byte) {
 }
 
 // maybeSaveSnapshot saves snapshot if the size of raft state exceeds maxRaftState.
-func (kv *ShardKV) maybeSaveSnapshot(logIndex int) {
+func (kv *ShardKV) maybeSaveSnapshot(index int) {
 	if kv.maxRaftState == -1 || kv.persister.RaftStateSize() < kv.maxRaftState {
 		return
 	}
@@ -115,75 +111,93 @@ func (kv *ShardKV) maybeSaveSnapshot(logIndex int) {
 	encoder := labgob.NewEncoder(buffer)
 	if encoder.Encode(kv.state) != nil || encoder.Encode(kv.appliedMap) != nil ||
 		encoder.Encode(kv.config) != nil || encoder.Encode(kv.lastConfig) != nil {
-		kv.logger.Panic("Failed to encode server state")
+		panic("Failed to encode server state")
 	}
-	kv.rf.Snapshot(logIndex, buffer.Bytes())
-	kv.logger.Infof("%s Snapshot to: %d", kv, logIndex)
+	kv.rf.Snapshot(index, buffer.Bytes())
 }
 
 // ExecKVCommand executes KV command.
 func (kv *ShardKV) ExecKVCommand(request *KVCommandRequest, response *KVCommandResponse) {
-	shard := key2shard(request.Key)
-
 	defer kv.logger.Infof("%s Exec kv command, request: %+v, response: %+v", kv, request, response)
 
-	kv.mu.Lock()
-	if kv.isStableShard(shard) {
+	clientId := request.ClientId
+	commandId := request.CommandId
+	key := request.Key
+	value := request.Value
+	method := request.Method
+	shard := key2shard(request.Key)
+
+	kv.mu.RLock()
+	if kv.isStaleShard(shard) {
 		response.Err = ErrWrongGroup
-		kv.mu.Unlock()
+		kv.mu.RUnlock()
 		return
 	}
-	kv.mu.Unlock()
+	kv.mu.RUnlock()
 
-	if _, isLeader := kv.rf.GetState(); !isLeader {
+	command := Operation{
+		ClientId:  clientId,
+		CommandId: commandId,
+		Key:       key,
+		Value:     value,
+		Method:    method,
+	}
+
+	index, _, isLeader := kv.rf.Start(command)
+	if !isLeader {
 		response.Err = ErrWrongLeader
 		return
 	}
 
-	command := Operation{
-		ClientId:  request.ClientId,
-		CommandId: request.CommandId,
-		Key:       request.Key,
-		Value:     request.Value,
-		Method:    request.Method,
-		Command:   NewCommand(),
-	}
-	re := kv.proposeCommand(command)
-	if re.Err != OK {
-		response.Err = re.Err
+	appliedCommand, err := kv.consensus(index)
+	if err == ErrTimeout {
+		response.Err = ErrTimeout
 		return
 	}
 
-	kv.mu.Lock()
-	if kv.isStableShard(shard) {
-		response.Err = ErrWrongGroup
-		kv.mu.Unlock()
+	operation, ok := appliedCommand.(Operation)
+	if !ok {
+		response.Err = ErrWrongLeader
 		return
 	}
-	if command.Method == MethodGet {
-		response.Value = kv.state[shard].Get(command.Key)
+
+	appliedClientId := operation.ClientId
+	appliedComandId := operation.CommandId
+	if clientId != appliedClientId || commandId != appliedComandId {
+		response.Err = ErrWrongLeader
+		return
 	}
-	kv.mu.Unlock()
+
+	kv.mu.RLock()
+	if kv.isStaleShard(shard) {
+		response.Err = ErrWrongGroup
+		kv.mu.RUnlock()
+		return
+	}
+	if request.Method == MethodGet {
+		response.Value = kv.state[shard].Get(request.Key)
+	}
+	kv.mu.RUnlock()
 	response.Err = OK
 }
 
-// FetchShard fetches the shards that need to be migrated.
+// FetchShard returns the data of the shards that need to be migrated.
 func (kv *ShardKV) FetchShard(request *FetchShardRequest, response *FetchShardResponse) {
 	if _, isLeader := kv.rf.GetState(); !isLeader {
 		response.Err = ErrWrongLeader
 		return
 	}
 
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
+	kv.mu.RLock()
 	if kv.config.Num < request.Num {
 		response.Err = ErrConfig
+		kv.mu.RUnlock()
 		return
 	}
 
+	shardList := request.ShardList
 	state := make(map[int]Shard)
-	for _, shard := range request.ShardList {
+	for _, shard := range shardList {
 		state[shard] = Shard{
 			Data: kv.state[shard].Copy(),
 		}
@@ -198,97 +212,49 @@ func (kv *ShardKV) FetchShard(request *FetchShardRequest, response *FetchShardRe
 	response.Num = kv.config.Num
 	response.State = state
 	response.AppliedMap = appliedMap
+	kv.mu.RUnlock()
 }
 
-// ClearShard clears the shards that have been migrated.
+// ClearShard clears the data of the shards that have been migrated.
 func (kv *ShardKV) ClearShard(request *CleanShardRequest, response *CleanShardResponse) {
 	if _, isLeader := kv.rf.GetState(); !isLeader {
 		response.Err = ErrWrongLeader
 		return
 	}
 
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	if kv.config.Num < request.Num {
+	kv.mu.RLock()
+	if kv.config.Num > request.Num {
 		response.Err = OK
+		kv.mu.RUnlock()
 		return
 	}
+	kv.mu.RUnlock()
 
-	command := CleanShard{
+	command := ClearShard{
 		Num:       request.Num,
 		ShardList: request.ShardList,
-		Command:   NewCommand(),
 	}
-	re := kv.proposeCommand(command)
-	response.Err = re.Err
-}
-
-// proposeCommand proposes a command to leader and waits for the command execution to complete.
-func (kv *ShardKV) proposeCommand(cmd UniqueId) (re Result) {
-	if _, _, isLeader := kv.rf.Start(cmd); !isLeader {
-		re.Err = ErrWrongLeader
-		return
-	}
-
-	kv.logger.Infof("%s Propose command: %+v", kv, cmd)
-
-	responseCh := kv.createResponseCh(cmd.ID())
-	defer kv.removeResponseCh(cmd.ID())
-
-	select {
-	case <-kv.stopCh:
-		re.Err = ErrServer
-	case <-time.After(consensusTimeout):
-		re.Err = ErrTimeout
-	case re = <-responseCh:
-	}
-	return
-}
-
-// createResponseCh creates a response channel according to the request Id.
-func (kv *ShardKV) createResponseCh(requestId int64) chan Result {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	responseCh := make(chan Result, 1)
-	kv.responseCh[requestId] = responseCh
-	return responseCh
-}
-
-// removeNotifyReCh removes the response channel according to the request id.
-func (kv *ShardKV) removeResponseCh(requestId int64) {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	delete(kv.responseCh, requestId)
-}
-
-// sendResponse sends response.
-func (kv *ShardKV) sendResponse(requestId int64, err Err, value interface{}) {
-	if ch, ok := kv.responseCh[requestId]; ok {
-		ch <- Result{
-			Err:   err,
-			Value: value,
-		}
+	index, _, isLeader := kv.rf.Start(command)
+	if isLeader {
+		_, response.Err = kv.consensus(index)
+	} else {
+		response.Err = ErrWrongLeader
 	}
 }
 
 // handleRaftReady handles the applied messages from Raft.
 func (kv *ShardKV) handleRaftReady() {
-	for {
-		select {
-		case <-kv.stopCh:
-			return
-		case applyMsg := <-kv.applyCh:
-			kv.mu.Lock()
+	for !kv.killed() {
+		applyMsg := <-kv.applyCh
+		kv.mu.Lock()
 
-			if applyMsg.SnapshotValid {
-				kv.applySnapshot(applyMsg)
-			} else if applyMsg.CommandValid {
-				kv.applyCommand(applyMsg)
-			}
-
-			kv.mu.Unlock()
+		if applyMsg.SnapshotValid {
+			kv.applySnapshot(applyMsg)
+		} else if applyMsg.CommandValid {
+			kv.applyCommand(applyMsg)
 		}
+
+		kv.mu.Unlock()
 	}
 }
 
@@ -310,45 +276,37 @@ func (kv *ShardKV) applyCommand(applyMsg raft.ApplyMsg) {
 	if command, ok := applyMsg.Command.(FetchShard); ok {
 		kv.doApplyFetchShard(command)
 	}
-	if command, ok := applyMsg.Command.(CleanShard); ok {
+	if command, ok := applyMsg.Command.(ClearShard); ok {
 		kv.doApplyClearShard(command)
 	}
 
-	cmd := applyMsg.Command.(UniqueId)
-	kv.sendResponse(cmd.ID(), OK, applyMsg.Command)
-	kv.maybeSaveSnapshot(applyMsg.SnapshotIndex)
+	if responseCh, ok := kv.responseCh[applyMsg.CommandIndex]; ok {
+		responseCh <- applyMsg.Command
+	}
+	kv.maybeSaveSnapshot(applyMsg.CommandIndex)
 }
 
 // doApplyOperation does applying the KV operation.
 func (kv *ShardKV) doApplyOperation(command Operation) {
-	kv.logger.Infof("%s Apply KV command: [id=%d, method=%s, key=%s, value=%s]",
-		kv, command.CommandId, command.Method, command.Key, command.Value)
-
-	// Prevent stale read.
+	commandId := command.CommandId
+	clientId := command.ClientId
+	method := command.Method
+	key := command.Key
+	value := command.Value
 	shard := key2shard(command.Key)
-	if kv.isStableShard(shard) {
-		kv.logger.Warnf("%s Shard [%s] has been migrated to [%d]", kv, shard, kv.config.Shards[shard])
-		return
-	}
 
-	// Ensure idempotence.
-	if lastCommandId, ok := kv.appliedMap[command.ClientId]; ok && lastCommandId >= command.CommandId {
-		kv.logger.Warnf("%s commandId(%d) <= lastCommandId(%d)", kv, command.CommandId, lastCommandId)
-		return
+	if !kv.isStaleShard(shard) && kv.appliedMap[clientId] < commandId {
+		switch method {
+		case MethodPut:
+			kv.state[shard].Put(key, value)
+		case MethodAppend:
+			kv.state[shard].Append(key, value)
+		}
+		kv.appliedMap[clientId] = commandId
 	}
-
-	switch command.Method {
-	case MethodPut:
-		kv.logger.Debugf("%s Put: <%v, %v>", kv, command.Key, command.Value)
-		kv.state[shard].Put(command.Key, command.Value)
-	case MethodAppend:
-		kv.logger.Infof("%s Append: <%v, %v>", kv, command.Key, command.Value)
-		kv.state[shard].Append(command.Key, command.Value)
-	}
-	kv.appliedMap[command.ClientId] = command.CommandId
 }
 
-// doApplyConfiguration does applying the last configuration.
+// doApplyConfiguration does applying a new configuration.
 func (kv *ShardKV) doApplyConfiguration(command Configuration) {
 	nextConfig := command.Config
 	nextNum := nextConfig.Num
@@ -356,12 +314,15 @@ func (kv *ShardKV) doApplyConfiguration(command Configuration) {
 		return
 	}
 
+	kv.logger.Infof("%s Apply config: %+v", kv, command.Config)
 	for shard, targetGid := range nextConfig.Shards {
 		originGid := kv.config.Shards[shard]
-		if targetGid == kv.gid && targetGid != kv.gid && originGid != 0 {
+		if targetGid == kv.gid && originGid != kv.gid && originGid != 0 {
+			kv.logger.Infof("%s Migrate shard[%d]: %d <- %d", kv, shard, kv.gid, originGid)
 			kv.state[shard].Status = StatusPulling
 		}
 		if targetGid != kv.gid && originGid == kv.gid && targetGid != 0 {
+			kv.logger.Infof("%s Migrate shard[%d]: %d -> %d", kv, shard, kv.gid, targetGid)
 			kv.state[shard].Status = StatusPushing
 		}
 	}
@@ -372,20 +333,23 @@ func (kv *ShardKV) doApplyConfiguration(command Configuration) {
 
 // doApplyFetchShard does applying the shard.
 func (kv *ShardKV) doApplyFetchShard(command FetchShard) {
-	if command.Num != kv.config.Num {
+	state := command.State
+	appliedMap := command.AppliedMap
+	num := command.Num
+	if num != kv.config.Num {
 		return
 	}
 
-	for shard := range command.State {
+	for shard := range state {
 		if kv.state[shard].Status == StatusPulling {
-			for k, v := range command.State[shard].Data {
+			for k, v := range state[shard].Data {
 				kv.state[shard].Put(k, v)
 			}
 			kv.state[shard].Status = StatusMigrated
 		}
 	}
 
-	for clientId, commandId := range command.AppliedMap {
+	for clientId, commandId := range appliedMap {
 		if kv.appliedMap[clientId] < commandId {
 			kv.appliedMap[clientId] = commandId
 		}
@@ -393,12 +357,14 @@ func (kv *ShardKV) doApplyFetchShard(command FetchShard) {
 }
 
 // doApplyClearShard does clearing the shard.
-func (kv *ShardKV) doApplyClearShard(command CleanShard) {
-	if command.Num != kv.config.Num {
+func (kv *ShardKV) doApplyClearShard(command ClearShard) {
+	shardList := command.ShardList
+	num := command.Num
+	if num != kv.config.Num {
 		return
 	}
 
-	for _, shard := range command.ShardList {
+	for _, shard := range shardList {
 		if kv.state[shard].Status == StatusMigrated {
 			kv.state[shard].Status = StatusDefault
 		}
@@ -415,8 +381,7 @@ func (kv *ShardKV) doApplyClearShard(command CleanShard) {
 // pullConfigPeriodically handles the config if it changes.
 func (kv *ShardKV) pullConfigPeriodically() {
 	for !kv.killed() {
-		kv.mu.Lock()
-		num := kv.config.Num
+		kv.mu.RLock()
 		shardAllDefault := true
 		for _, shard := range kv.state {
 			if shard.Status != StatusDefault {
@@ -424,21 +389,20 @@ func (kv *ShardKV) pullConfigPeriodically() {
 				break
 			}
 		}
-		kv.mu.Unlock()
+		kv.mu.RUnlock()
 
 		_, isLeader := kv.rf.GetState()
 		if isLeader && shardAllDefault {
-			nextConfig := kv.clerk.Query(num + 1)
-			if nextConfig.Num == num+1 {
-				kv.logger.Infof("%s Pull next config: %+v", kv, nextConfig)
+			nextConfig := kv.clerk.Query(kv.config.Num + 1)
 
+			if kv.config.Num+1 == nextConfig.Num {
 				command := Configuration{
-					Config:  nextConfig,
-					Command: NewCommand(),
+					Config: nextConfig,
 				}
 
-				if _, isLeader := kv.rf.GetState(); isLeader {
-					_ = kv.proposeCommand(command)
+				index, _, isLeader := kv.rf.Start(command)
+				if isLeader {
+					kv.consensus(index)
 				}
 			}
 		}
@@ -447,32 +411,46 @@ func (kv *ShardKV) pullConfigPeriodically() {
 	}
 }
 
+// broadcastHeartbeat broadcasts heartbeat in raft group.
+func (kv *ShardKV) broadcastHeartbeat() {
+	for !kv.killed() {
+		_, isLeader := kv.rf.GetState()
+		if isLeader {
+			index, _, isLeader := kv.rf.Start(Operation{})
+			if isLeader {
+				kv.consensus(index)
+			}
+		}
+
+		time.Sleep(heartbeatInternal)
+	}
+}
+
 // scanPullingShards handles the pulling shards.
 func (kv *ShardKV) scanPullingShards() {
 	for !kv.killed() {
-		if _, isLeader := kv.rf.GetState(); !isLeader {
-			continue
-		}
-
-		gidShardList := make(map[int][]int)
-		kv.mu.Lock()
-		for shard := range kv.state {
-			if kv.state[shard].Status == StatusPulling {
-				originGid := kv.lastConfig.Shards[shard]
-				gidShardList[originGid] = append(gidShardList[originGid], shard)
+		_, isLeader := kv.rf.GetState()
+		if isLeader {
+			kv.mu.RLock()
+			gidShardList := make(map[int][]int)
+			for shard := range kv.state {
+				if kv.state[shard].Status == StatusPulling {
+					gid := kv.lastConfig.Shards[shard]
+					gidShardList[gid] = append(gidShardList[gid], shard)
+				}
 			}
-		}
-		kv.mu.Unlock()
+			kv.mu.RUnlock()
 
-		if len(gidShardList) > 0 {
-			kv.logger.Infof("%s Scan pulling shards: %+v", kv, gidShardList)
+			if len(gidShardList) > 0 {
+				kv.logger.Infof("%s Scan pulling shards: %+v", kv, gidShardList)
 
-			var wg sync.WaitGroup
-			for gid, shardList := range gidShardList {
-				wg.Add(1)
-				go kv.sendFetchShard(&wg, gid, shardList)
+				var waitGroup sync.WaitGroup
+				for gid, shardList := range gidShardList {
+					waitGroup.Add(1)
+					go kv.sendFetchShard(&waitGroup, gid, shardList)
+				}
+				waitGroup.Wait()
 			}
-			wg.Wait()
 		}
 
 		time.Sleep(scanShardInternal)
@@ -482,29 +460,28 @@ func (kv *ShardKV) scanPullingShards() {
 // scanMigratedShards handles the migrated shards.
 func (kv *ShardKV) scanMigratedShards() {
 	for !kv.killed() {
-		if _, isLeader := kv.rf.GetState(); !isLeader {
-			continue
-		}
-
-		gidShardList := make(map[int][]int)
-		kv.mu.Lock()
-		for shard := range kv.state {
-			if kv.state[shard].Status == StatusMigrated {
-				originGid := kv.lastConfig.Shards[shard]
-				gidShardList[originGid] = append(gidShardList[originGid], shard)
+		_, isLeader := kv.rf.GetState()
+		if isLeader {
+			kv.mu.RLock()
+			gidShardList := make(map[int][]int)
+			for shard := range kv.state {
+				if kv.state[shard].Status == StatusMigrated {
+					gid := kv.lastConfig.Shards[shard]
+					gidShardList[gid] = append(gidShardList[gid], shard)
+				}
 			}
-		}
-		kv.mu.Unlock()
+			kv.mu.RUnlock()
 
-		if len(gidShardList) > 0 {
-			kv.logger.Infof("%s Scan migrated shards: %+v", kv, gidShardList)
+			if len(gidShardList) > 0 {
+				kv.logger.Infof("%s Scan migrated shards: %+v", kv, gidShardList)
 
-			var wg sync.WaitGroup
-			for gid, shardList := range gidShardList {
-				wg.Add(1)
-				go kv.sendClearShard(&wg, gid, shardList)
+				var waitGroup sync.WaitGroup
+				for gid, shardList := range gidShardList {
+					waitGroup.Add(1)
+					go kv.sendClearShard(&waitGroup, gid, shardList)
+				}
+				waitGroup.Wait()
 			}
-			wg.Wait()
 		}
 
 		time.Sleep(scanShardInternal)
@@ -521,19 +498,18 @@ func (kv *ShardKV) sendFetchShard(wg *sync.WaitGroup, gid int, shardList []int) 
 		response := FetchShardResponse{}
 
 		ok := kv.makeEnd(server).Call("ShardKV.FetchShard", &request, &response)
-		kv.logger.Debugf("%s sendFetchShard, request: %+v, response: %+v", kv, request, response)
+		kv.logger.Infof("%s sendFetchShard to %s, request: %+v, response: %+v", kv, server, request, response)
 
 		if ok && response.Err == OK {
 			command := FetchShard{
 				Num:        response.Num,
 				State:      response.State,
 				AppliedMap: response.AppliedMap,
-				Command:    NewCommand(),
 			}
 
-			if _, isLeader := kv.rf.GetState(); isLeader {
-				re := kv.proposeCommand(command)
-				response.Err = re.Err
+			index, _, isLeader := kv.rf.Start(command)
+			if isLeader {
+				_, response.Err = kv.consensus(index)
 			} else {
 				response.Err = ErrWrongLeader
 			}
@@ -554,18 +530,17 @@ func (kv *ShardKV) sendClearShard(wg *sync.WaitGroup, gid int, shardList []int) 
 		response := CleanShardResponse{}
 
 		ok := kv.makeEnd(server).Call("ShardKV.ClearShard", &request, &response)
-		kv.logger.Debugf("%s sendClearShard, request: %+v, response: %+v", kv, request, response)
+		kv.logger.Infof("%s sendClearShard to %s, request: %+v, response: %+v", kv, server, request, response)
 
 		if ok && response.Err == OK {
-			command := CleanShard{
+			command := ClearShard{
 				Num:       kv.config.Num,
 				ShardList: shardList,
-				Command:   NewCommand(),
 			}
 
-			if _, isLeader := kv.rf.GetState(); isLeader {
-				re := kv.proposeCommand(command)
-				response.Err = re.Err
+			index, _, isLeader := kv.rf.Start(command)
+			if isLeader {
+				_, response.Err = kv.consensus(index)
 			} else {
 				response.Err = ErrWrongLeader
 			}
@@ -574,6 +549,37 @@ func (kv *ShardKV) sendClearShard(wg *sync.WaitGroup, gid int, shardList []int) 
 	}
 
 	wg.Done()
+}
+
+// consensus waits the command corresponding to the index to reach consensus.
+func (kv *ShardKV) consensus(index int) (interface{}, Err) {
+	responseCh := kv.createResponseCh(index)
+	defer kv.removeResponseCh(index)
+
+	select {
+	case command := <-responseCh:
+		return command, OK
+	case <-time.After(consensusTimeout):
+		return nil, ErrTimeout
+	}
+}
+
+// createResponseCh creates a response channel according to command index.
+func (kv *ShardKV) createResponseCh(index int) chan interface{} {
+	kv.mu.Lock()
+	kv.responseCh[index] = make(chan interface{}, 1)
+	kv.mu.Unlock()
+	return kv.responseCh[index]
+}
+
+// removeNotifyReCh removes the response channel according to the command index.
+func (kv *ShardKV) removeResponseCh(index int) {
+	kv.mu.Lock()
+	if broadcastCh, ok := kv.responseCh[index]; ok {
+		close(broadcastCh)
+		delete(kv.responseCh, index)
+	}
+	kv.mu.Unlock()
 }
 
 // StartServer starts a ShardKV server.
@@ -599,37 +605,27 @@ func (kv *ShardKV) sendClearShard(wg *sync.WaitGroup, gid int, shardList []int) 
 // Config.Groups[gid][i] into a labrpc.ClientEnd on which you can
 // send RPCs. You'll need this to send RPCs to other groups.
 //
-// look at client.go for examples of how to use ctrlers[]
+// look at appliedMap.go for examples of how to use ctrlers[]
 // and makeEnd() to send RPCs to the group owning a specific shard.
 //
 // StartServer() must return quickly, so it should start goroutines
 // for any long-running work.
 //
 func StartServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister, maxRaftState int, gid int, ctrlers []*labrpc.ClientEnd, makeEnd func(string) *labrpc.ClientEnd) *ShardKV {
-	// call labgob.Register on structures you want
-	// Go's RPC library to marshall/unmarshall.
-	labgob.Register(Operation{})
-	labgob.Register(FetchShard{})
-	labgob.Register(CleanShard{})
-	labgob.Register(Result{})
-
 	kv := new(ShardKV)
 	kv.id = id
-	kv.applyCh = make(chan raft.ApplyMsg)
-	kv.stopCh = make(chan struct{})
-
-	kv.maxRaftState = maxRaftState
-	kv.persister = persister
-
-	kv.makeEnd = makeEnd
 	kv.gid = gid
+	kv.persister = persister
+	kv.maxRaftState = maxRaftState
+	kv.applyCh = make(chan raft.ApplyMsg)
+	kv.makeEnd = makeEnd
+
 	kv.ctrlers = ctrlers
 	kv.clerk = shardctrler.MakeClerk(kv.ctrlers)
-
 	kv.appliedMap = make(map[int64]int64)
-	kv.responseCh = make(map[int64]chan Result)
-	for idx := range kv.state {
-		kv.state[idx] = Shard{
+	kv.responseCh = make(map[int]chan interface{})
+	for index := range kv.state {
+		kv.state[index] = Shard{
 			Status: StatusDefault,
 			Data:   make(map[string]string),
 		}
@@ -637,13 +633,15 @@ func StartServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister,
 
 	kv.readPersist(kv.persister.ReadSnapshot())
 	kv.rf = raft.Make(servers, id, persister, kv.applyCh)
-	kv.logger = log.NewZapLogger("ShardKV", zapcore.InfoLevel).Sugar()
 
 	go kv.handleRaftReady()
 	go kv.pullConfigPeriodically()
+	go kv.broadcastHeartbeat()
 	go kv.scanPullingShards()
 	go kv.scanMigratedShards()
 
+	kv.logger = log.NewZapLogger("ShardKV", zapcore.InfoLevel).Sugar()
 	kv.logger.Infof("%s ShardKV server [%v] started successfully", kv, id)
+
 	return kv
 }

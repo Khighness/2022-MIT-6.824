@@ -5,21 +5,11 @@ import (
 	"6.824/shardctrler"
 )
 
-//
-// Sharded key/value server.
-// Lots of replica groups, each running Raft.
-// Shardctrler decides which group serves each shard.
-// Shardctrler may change shard assignment from time to time.
-//
-// You will have to modify these definitions.
-//
-
 const (
 	OK             = "OK"
 	ErrNoKey       = "ErrNoKey"
 	ErrWrongGroup  = "ErrWrongGroup"
 	ErrWrongLeader = "ErrWrongLeader"
-	ErrServer      = "ErrServer"
 	ErrTimeout     = "ErrTimeout"
 	ErrConfig      = "ErrConfig"
 )
@@ -38,14 +28,11 @@ type Status int
 const (
 	// StatusDefault represents the shard can be accessed.
 	StatusDefault = iota
-	// StatusPulling represents the server that currently
-	// owns the shard is pulling for data from origin server.
+	// StatusPulling represents the server that currently owns the shard is pulling for data from origin server.
 	StatusPulling
-	// StatusPushing represents the origin server that lastly
-	// owns shard is pushing data to the target server.
+	// StatusPushing represents the origin server that lastly owns shard is pushing data to the target server.
 	StatusPushing
-	// StatusMigrated represents the shard is migrated to
-	// the target server.
+	// StatusMigrated represents the shard is migrated to the target server.
 	StatusMigrated
 )
 
@@ -53,7 +40,7 @@ func init() {
 	labgob.Register(Operation{})
 	labgob.Register(Configuration{})
 	labgob.Register(FetchShard{})
-	labgob.Register(CleanShard{})
+	labgob.Register(ClearShard{})
 }
 
 // Shard structure.
@@ -126,40 +113,18 @@ type CleanShardResponse struct {
 	Err Err
 }
 
-// UniqueId interface.
-type UniqueId interface {
-	ID() int64
-}
-
-// Command structure.
-type Command struct {
-	RequestId int64
-}
-
-// ID implements UniqueId.
-func (c Command) ID() int64 {
-	return c.RequestId
-}
-
-// NewCommand creates a command instance.
-func NewCommand() Command {
-	return Command{RequestId: randInt64()}
-}
-
-// Operation structure.
+// ExecKVCommand structure.
 type Operation struct {
 	ClientId  int64
 	CommandId int64
 	Key       string
 	Value     string
 	Method    string
-	Command
 }
 
 // Configuration structure.
 type Configuration struct {
 	Config shardctrler.Config
-	Command
 }
 
 // FetchShard structure.
@@ -167,14 +132,12 @@ type FetchShard struct {
 	Num        int
 	State      map[int]Shard
 	AppliedMap map[int64]int64
-	Command
 }
 
-// CleanShard structure.
-type CleanShard struct {
+// ClearShard structure.
+type ClearShard struct {
 	Num       int
 	ShardList []int
-	Command
 }
 
 // Result structure.
