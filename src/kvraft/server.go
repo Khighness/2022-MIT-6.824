@@ -16,7 +16,7 @@ import (
 
 const (
 	emptyValue  = ""
-	execTimeOut = 500 * time.Millisecond
+	execTimeout = 500 * time.Millisecond
 )
 
 // Op structure.
@@ -60,8 +60,8 @@ type KVServer struct {
 	mu      sync.Mutex
 	id      int
 	rf      *raft.Raft
-	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
+	applyCh chan raft.ApplyMsg
 	stopCh  chan struct{}
 
 	maxRaftState int             // snapshot if log grows this big
@@ -69,7 +69,7 @@ type KVServer struct {
 
 	keyValData map[string]string // stores the key-value pair
 	appliedMap map[int64]int64   // stores the clientId-commandId pair
-	responseCh map[int64]chan Re // the channel to send response
+	responseCh map[int64]chan Re // stores the requestId-responseCh pair
 
 	logger *zap.SugaredLogger
 }
@@ -79,7 +79,7 @@ func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
 	close(kv.stopCh)
-	kv.logger.Infof("%s Server is stopped", kv.rf)
+	kv.logger.Infof("%s KVServer is stopped", kv.rf)
 }
 
 // killed checks is the server is killed.
@@ -135,48 +135,45 @@ func (kv *KVServer) ExecCommand(request *KVRequest, response *KVResponse) {
 		return
 	}
 
-	kv.waitCommand(NewOp(*request), response)
+	kv.proposeCommand(NewOp(*request), response)
 }
 
-// waitCommand waits for command execution to complete.
-func (kv *KVServer) waitCommand(op Op, response *KVResponse) {
+// proposeCommand proposes a command to leader and waits for the command execution to complete.
+func (kv *KVServer) proposeCommand(op Op, response *KVResponse) {
 	_, _, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		response.Err = ErrWrongLeader
 		return
 	}
 
-	kv.mu.Lock()
-	responseCh := make(chan Re, 1)
-	kv.responseCh[op.RequestId] = responseCh
-	kv.mu.Unlock()
+	responseCh := kv.createResponseCh(op.RequestId)
+	defer kv.removeResponseCh(op.RequestId)
 
-	timer := time.NewTimer(execTimeOut)
 	select {
 	case <-kv.stopCh:
 		response.Err = ErrServerStopped
-	case <-timer.C:
+	case <-time.After(execTimeout):
 		response.Err = ErrExecTimeout
 	case re := <-responseCh:
 		response.Err = re.Err
 		response.Value = re.Value
 	}
-
-	kv.removeResponseCh(op.RequestId)
 }
 
-// sendResponse sends response.
-func (kv *KVServer) sendResponse(requestId int64, err Err, value string) {
-	if ch, ok := kv.responseCh[requestId]; ok {
-		ch <- NewRe(err, value)
-	}
+// createResponseCh creates a response channel according to the request Id.
+func (kv *KVServer) createResponseCh(requestId int64) chan Re {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	responseCh := make(chan Re, 1)
+	kv.responseCh[requestId] = responseCh
+	return responseCh
 }
 
 // removeNotifyReCh removes the response channel according to the request id.
-func (kv *KVServer) removeResponseCh(reqId int64) {
+func (kv *KVServer) removeResponseCh(requestId int64) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	delete(kv.responseCh, reqId)
+	delete(kv.responseCh, requestId)
 }
 
 // handleRaftReady handles the applied messages from Raft.
@@ -252,6 +249,13 @@ func (kv *KVServer) handlePutOrAppendOp(op Op) {
 	kv.sendResponse(op.RequestId, OK, emptyValue)
 }
 
+// sendResponse sends response.
+func (kv *KVServer) sendResponse(requestId int64, err Err, value string) {
+	if ch, ok := kv.responseCh[requestId]; ok {
+		ch <- NewRe(err, value)
+	}
+}
+
 // StartKVServer starts a KVServer.
 func StartKVServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persister, maxRaftState int) *KVServer {
 	labgob.Register(Op{})
@@ -269,7 +273,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, id int, persister *raft.Persiste
 	kv.responseCh = make(map[int64]chan Re)
 
 	kv.readPersist(true, 0, 0, kv.persister.ReadSnapshot())
-	kv.logger = log.NewZapLogger("KVServer", zap.WarnLevel).Sugar()
+	kv.logger = log.NewZapLogger("KVServer", zap.DebugLevel).Sugar()
 	kv.rf = raft.Make(servers, id, persister, kv.applyCh)
 
 	go kv.handleRaftReady()
