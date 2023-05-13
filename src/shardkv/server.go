@@ -163,8 +163,8 @@ func (kv *ShardKV) ExecKVCommand(request *KVCommandRequest, response *KVCommandR
 	}
 
 	appliedClientId := operation.ClientId
-	appliedComandId := operation.CommandId
-	if clientId != appliedClientId || commandId != appliedComandId {
+	appliedCommandId := operation.CommandId
+	if clientId != appliedClientId || commandId != appliedCommandId {
 		response.Err = ErrWrongLeader
 		return
 	}
